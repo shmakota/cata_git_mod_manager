@@ -242,6 +242,31 @@ class ModManagerApp:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete folder:\n{e}", parent=self.root)
     
+
+    def _open_installed_mod_folder(self):
+        selected = self.installed_listbox.curselection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Select an installed mod folder to open.", parent=self.root)
+            return
+
+        index = selected[0]
+        folder_name = self.installed_listbox.get(index)
+        folder_path = os.path.join(self.mod_install_dir, folder_name)
+
+        if not os.path.exists(folder_path):
+            messagebox.showerror("Error", f"Folder does not exist:\n{folder_path}", parent=self.root)
+            return
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder_path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", folder_path])
+            else:  # Linux and others
+                subprocess.Popen(["xdg-open", folder_path])
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open folder:\n{e}", parent=self.root)
+
     
     # --- UI Construction ---
     def _build_ui(self):
@@ -328,12 +353,17 @@ class ModManagerApp:
         installed_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.installed_listbox.config(yscrollcommand=installed_scrollbar.set)
 
-        self.installed_button = tk.Button(installed_mods_frame, text="Delete (Unrecoverable)", command=self._delete_installed_mod)
-        self.installed_button.pack(side=tk.LEFT, fill=tk.X, pady=(5, 0))
+        button_frame = tk.Frame(installed_mods_frame)
+        button_frame.pack(pady=(5, 0), fill=tk.X)
 
-        # 🔄 Refresh Installed Mods button
-        self.refresh_installed_button = tk.Button(installed_mods_frame, text="Refresh Installed Mods", command=self._refresh_installed_mods)
-        self.refresh_installed_button.pack(side=tk.RIGHT, fill=tk.X, pady=(5, 0), padx=(10, 0))
+        self.installed_button = tk.Button(button_frame, text="Delete", command=self._delete_installed_mod)
+        self.installed_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
+        self.open_folder_button = tk.Button(button_frame, text="Open Folder", command=self._open_installed_mod_folder)
+        self.open_folder_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
+        self.refresh_installed_button = tk.Button(button_frame, text="Refresh", command=self._refresh_installed_mods)
+        self.refresh_installed_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
 
         # Bottom — Open Mod Folder (spans both columns)
         open_mod_btn_frame = tk.Frame(self.frame)
