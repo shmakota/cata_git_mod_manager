@@ -172,9 +172,14 @@ class ModManagerApp:
             self._refresh_profile_combo()
             self._refresh_mod_list()
 
+            if hasattr(self, "profile_manager_dialog"):
+                new_profile_name = self.profile_var.get()  # or whatever is current
+                self.profile_manager_dialog.update_profile_name(new_profile_name)
+            
             messagebox.showinfo("Import Success", "Profile(s) imported successfully.", parent=self.root)
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to import profile:\n{e}", parent=self.root)
+         # Then update label if dialog is open
     
     def _export_profile(self):
         if not self.current_profile:
@@ -246,22 +251,16 @@ class ModManagerApp:
         # Profile management frame — SPANS BOTH columns (0 and 1)
         profile_frame = tk.Frame(self.frame)
         profile_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        profile_frame.columnconfigure(1, weight=1)  # Make combo box expand
 
-        tk.Label(profile_frame, text="Profile:").pack(side=tk.LEFT, padx=(0, 5))
+        tk.Label(profile_frame, text="Profile:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+
         self.profile_var = tk.StringVar()
         self.profile_combo = ttk.Combobox(profile_frame, textvariable=self.profile_var, state="readonly", width=30)
-        self.profile_combo.pack(side=tk.LEFT)
+        self.profile_combo.grid(row=0, column=1, sticky="ew")
         self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_change)
 
-        for text, cmd in [("New", self._create_profile),
-                        ("Rename", self._rename_profile),
-                        ("Delete", self._delete_profile),
-                        ("Export", self._export_profile),
-                        ("Import", self._import_profile)]:
-            btn = tk.Button(profile_frame, text=text, command=cmd)
-            btn.pack(side=tk.LEFT, padx=5)
-
-        tk.Button(profile_frame, text="Set Mod Install Directory", command=self._set_mod_install_dir).pack(side=tk.LEFT, padx=10)
+        tk.Button(profile_frame, text="Manage Profiles", command=self.open_profile_manager).grid(row=0, column=2, padx=10)
 
         explanation = (
             "Enter the GitHub ZIP URL for the mod archive.\n"
@@ -277,12 +276,26 @@ class ModManagerApp:
 
         tk.Label(listbox_frame, text="GitHub Mods:").pack(anchor="w")
 
-        self.listbox = tk.Listbox(listbox_frame, width=50, height=20, activestyle='none')
-        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Container frame for Listbox + scrollbars
+        listbox_container = tk.Frame(listbox_frame)
+        listbox_container.pack(fill=tk.BOTH, expand=True)
 
-        scrollbar = ttk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.listbox.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.listbox.config(yscrollcommand=scrollbar.set)
+        # Listbox itself
+        self.listbox = tk.Listbox(listbox_container, width=50, height=20, activestyle='none', xscrollcommand=lambda *args: h_scrollbar.set(*args), yscrollcommand=lambda *args: v_scrollbar.set(*args))
+        self.listbox.grid(row=0, column=0, sticky="nsew")
+
+        # Vertical scrollbar
+        v_scrollbar = ttk.Scrollbar(listbox_container, orient=tk.VERTICAL, command=self.listbox.yview)
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Horizontal scrollbar
+        h_scrollbar = ttk.Scrollbar(listbox_container, orient=tk.HORIZONTAL, command=self.listbox.xview)
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+
+        # Configure grid weights for resizing
+        listbox_container.grid_rowconfigure(0, weight=1)
+        listbox_container.grid_columnconfigure(0, weight=1)
+        
 
         # Buttons under GitHub Mods list
         mod_buttons_frame = tk.Frame(self.frame)
@@ -353,6 +366,10 @@ class ModManagerApp:
         self._refresh_profile_combo()
         self._refresh_mod_list()
 
+        if hasattr(self, "profile_manager_dialog"):
+            new_profile_name = self.profile_var.get()  # or whatever is current
+            self.profile_manager_dialog.update_profile_name(new_profile_name)
+
     def _rename_profile(self):
         if not self.current_profile:
             messagebox.showerror("Error", "No profile selected.", parent=self.root)
@@ -370,6 +387,10 @@ class ModManagerApp:
         self._refresh_profile_combo()
         self._refresh_mod_list()
 
+        if hasattr(self, "profile_manager_dialog"):
+            new_profile_name = self.profile_var.get()  # or whatever is current
+            self.profile_manager_dialog.update_profile_name(new_profile_name)
+
     def _delete_profile(self):
         if not self.current_profile:
             messagebox.showerror("Error", "No profile selected.", parent=self.root)
@@ -385,6 +406,10 @@ class ModManagerApp:
             self._save_profiles()
             self._refresh_profile_combo()
             self._refresh_mod_list()
+            
+            if hasattr(self, "profile_manager_dialog"):
+                new_profile_name = self.profile_var.get()  # or whatever is current
+                self.profile_manager_dialog.update_profile_name(new_profile_name)
 
     def _refresh_profile_combo(self):
         profiles_list = list(self.profiles.keys())
@@ -422,7 +447,19 @@ class ModManagerApp:
         for mod in self._get_mods():
             keep_text = "Keep structure" if mod.get("keep_structure") else "Auto-detect"
             subdir = mod.get("subdir", "")
-            display = f"{mod['url']}  |  subdir: {subdir}  |  {keep_text}"
+
+            url = mod['url']
+            clean_url = url  # default fallback
+
+            # Handle GitHub archive URLs
+            github_zip = re.match(
+                r"https?://github\.com/([^/]+)/([^/]+)/archive/(?:refs/(?:heads|tags)/)?([^/]+)\.zip", url
+            )
+            if github_zip:
+                user, repo, ref = github_zip.groups()
+                clean_url = f"{user}/{repo}"
+
+            display = f"{clean_url}  |  subdir: {subdir}  |  {keep_text}"
             self.listbox.insert(tk.END, display)
 
     def _fix_github_url(self, url):
@@ -478,13 +515,11 @@ class ModManagerApp:
             mods.pop(index)
             self._set_mods(mods)
             self._refresh_mod_list()
-
-    # --- Other actions ---
+    
     def _set_mod_install_dir(self):
         new_dir = filedialog.askdirectory(title="Select Mod Install Directory", initialdir=self.mod_install_dir)
         if new_dir:
             self.mod_install_dir = new_dir
-            # Save to current profile mod_install_dir
             if self.current_profile and self.current_profile in self.profiles:
                 profile = self.profiles[self.current_profile]
                 if isinstance(profile, dict):
@@ -492,6 +527,10 @@ class ModManagerApp:
                 else:
                     self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": new_dir}
                 self._save_profiles()
+
+            # If dialog open, update any UI if needed (example: update profile label)
+            if hasattr(self, "profile_manager_dialog"):
+                self.profile_manager_dialog.update_profile_name(self.current_profile)
 
     def _open_mod_folder(self):
         if not os.path.isdir(self.mod_install_dir):
@@ -542,6 +581,7 @@ class ModManagerApp:
             messagebox.showerror("Update Errors", msg, parent=self.root)
         else:
             messagebox.showinfo("Update Complete", f"Successfully updated {success_count} mods.", parent=self.root)
+    
     def _download_and_extract_mod(self, mod):
         url = mod.get("url")
         subdir = mod.get("subdir", "")
@@ -571,55 +611,32 @@ class ModManagerApp:
                     zip_ref.extractall(extract_path)
                     logging.info(f"Extracted entire archive with full structure to {extract_path}")
 
-                elif subdir:
-                    # Extract the specified subdirectory inside the zip, preserving its folder name
-                    members = [m for m in zip_ref.namelist() if m.startswith(subdir + '/') or m == subdir]
-
-                    if not members:
-                        raise FileNotFoundError(f"Subdirectory '{subdir}' not found in the archive")
-
-                    target_path = os.path.join(self.mod_install_dir, os.path.basename(subdir))
-                    os.makedirs(target_path, exist_ok=True)
-
-                    for member in members:
-                        relative_path = member[len(subdir):].lstrip('/')
-                        target_file_path = os.path.join(target_path, relative_path)
-
-                        if member.endswith('/'):
-                            os.makedirs(target_file_path, exist_ok=True)
-                        else:
-                            os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
-                            with zip_ref.open(member) as source, open(target_file_path, "wb") as target:
-                                shutil.copyfileobj(source, target)
-
-                    logging.info(f"Extracted subdirectory '{subdir}' as '{os.path.basename(subdir)}' in {target_path}")
-
                 else:
-                    # Auto-detect mod folder by searching for modinfo.json inside the zip
-                    mod_folders = set()
+                    # Define root inside zip to search for mods (all files under subdir if specified, else whole zip)
+                    root_prefix = subdir.rstrip('/') + '/' if subdir else ""
 
-                    for file in zip_ref.namelist():
-                        if file.endswith("modinfo.json"):
-                            parts = file.split('/')
-                            if len(parts) > 1:
-                                # The mod folder is the parent directory of modinfo.json
-                                mod_folder_path = '/'.join(parts[:-1])
-                                mod_folders.add(mod_folder_path)
-                            else:
-                                mod_folders.add(parts[0])
+                    # Find all modinfo.json files recursively under root_prefix
+                    modinfo_paths = [f for f in zip_ref.namelist() if f.startswith(root_prefix) and f.endswith('modinfo.json')]
 
-                    if not mod_folders:
-                        raise FileNotFoundError("No modinfo.json found in the archive")
+                    if not modinfo_paths:
+                        raise FileNotFoundError(f"No modinfo.json found under '{subdir}' in the archive")
 
-                    for mod_folder in mod_folders:
-                        # Folder name is the last part of the path (e.g. "Material Plants")
-                        folder_name = mod_folder.split('/')[-1]
+                    # For each modinfo.json, extract its parent folder as a separate mod
+                    extracted_mods = set()
+                    for modinfo_path in modinfo_paths:
+                        parts = modinfo_path.split('/')
+                        mod_folder = '/'.join(parts[:-1])  # folder containing modinfo.json
 
+                        if mod_folder in extracted_mods:
+                            continue  # avoid extracting the same folder twice
+                        extracted_mods.add(mod_folder)
+
+                        folder_name = mod_folder.split('/')[-1] if mod_folder else ''
                         dest_folder = os.path.join(self.mod_install_dir, folder_name)
                         os.makedirs(dest_folder, exist_ok=True)
 
+                        # Extract all members belonging to this mod folder
                         members = [m for m in zip_ref.namelist() if m == mod_folder or m.startswith(mod_folder + '/')]
-
                         for member in members:
                             relative_path = member[len(mod_folder):].lstrip('/')
                             target_file_path = os.path.join(dest_folder, relative_path)
@@ -633,13 +650,25 @@ class ModManagerApp:
 
                         logging.info(f"Extracted mod folder '{mod_folder}' as '{folder_name}' in {dest_folder}")
 
-
-
             logging.info(f"Mod {url} installed successfully.")
             self._refresh_installed_mods()
 
+    def open_profile_manager(self):
+        self.profile_manager_dialog = ProfileManagerDialog(
+            self.root,
+            on_create=self._create_profile,
+            on_rename=self._rename_profile,
+            on_delete=self._delete_profile,
+            on_export=self._export_profile,
+            on_import=self._import_profile,
+            on_set_install_dir=self._set_mod_install_dir,
+            current_profile_name=self.profile_var.get()
+        )
+
+
 
 class EditModDialog(tk.Toplevel):
+
     def __init__(self, parent, url="", subdir="", keep_structure=False):
         super().__init__(parent)
         self.title("Edit Mod")
@@ -686,6 +715,48 @@ class EditModDialog(tk.Toplevel):
         keep_structure = self.keep_structure_var.get()
         self.result = (url, subdir, keep_structure)
         self.destroy()
+
+class ProfileManagerDialog(tk.Toplevel):
+    def __init__(self, parent, *, on_create, on_rename, on_delete, on_export, on_import, on_set_install_dir, current_profile_name=""):
+        super().__init__(parent)
+        self.on_set_install_dir = on_set_install_dir  # <-- THIS LINE is required!
+        self.title("Manage Profiles")
+        self.geometry("400x300")
+        self.transient(parent)
+        self.grab_set()
+
+        self.current_profile_name = current_profile_name
+
+        self._build_ui(on_create, on_rename, on_delete, on_export, on_import)
+
+        self.wait_visibility()
+        self.focus()
+
+    def _build_ui(self, on_create, on_rename, on_delete, on_export, on_import):
+        frame = tk.Frame(self, padx=10, pady=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        profile_label_text = f"Current Profile: {self.current_profile_name}" if self.current_profile_name else "No Profile Selected"
+        self.profile_label = tk.Label(frame, text=profile_label_text, font=("Arial", 12, "bold"))
+        self.profile_label.pack(pady=(0, 10))
+
+        btn_frame = tk.Frame(frame)
+        btn_frame.pack()
+
+        for text, cmd in [("New", on_create),
+                        ("Rename", on_rename),
+                        ("Delete", on_delete),
+                        ("Export", on_export),
+                        ("Import", on_import)]:
+            tk.Button(btn_frame, text=text, command=cmd, width=15).pack(side=tk.TOP, fill=tk.X, pady=3)
+
+        tk.Button(frame, text="Set Install Directory", command=self.on_set_install_dir, width=15).pack(pady=(15, 0))
+
+
+
+    def update_profile_name(self, new_name):
+        self.current_profile_name = new_name
+        self.profile_label.config(text=f"Current Profile: {new_name}" if new_name else "No Profile Selected")
 
 
 if __name__ == "__main__":
