@@ -365,6 +365,9 @@ class ModManagerApp:
         self.refresh_installed_button = tk.Button(button_frame, text="Refresh", command=self._refresh_installed_mods)
         self.refresh_installed_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
 
+        self.explore_button = tk.Button(button_frame, text="Explore", command=self._run_mod_viewer)
+        self.explore_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+
         # Bottom — Open Mod Folder (spans both columns)
         open_mod_btn_frame = tk.Frame(self.frame)
         open_mod_btn_frame.grid(row=4, column=0, columnspan=2, pady=10, sticky="ew")
@@ -694,6 +697,26 @@ class ModManagerApp:
             on_set_install_dir=self._set_mod_install_dir,
             current_profile_name=self.profile_var.get()
         )
+    
+    def _run_mod_viewer(self):
+        selected = self.installed_listbox.curselection()
+        if not selected:
+            messagebox.showwarning("No Selection", "Select an installed mod folder to explore.", parent=self.root)
+            return
+
+        index = selected[0]
+        folder_name = self.installed_listbox.get(index)
+        folder_path = os.path.join(self.mod_install_dir, folder_name)
+
+        if not os.path.isdir(folder_path):
+            messagebox.showerror("Error", f"Mod folder does not exist:\n{folder_path}", parent=self.root)
+            return
+
+        try:
+            subprocess.Popen(["./run_mod_viewer.sh", folder_path], cwd=os.getcwd())
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)
+
 
 
 
