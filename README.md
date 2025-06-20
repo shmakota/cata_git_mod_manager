@@ -29,7 +29,7 @@ A mod management tool for **Cataclysm: Dark Days Ahead (CDDA)** and **Cataclysm:
 
 ## Installation
 
-Download repo and run the install/launch script. Setup your profile and install directory.
+Clone the repo and run the install/launch script. Setup your profile and install directory.
 
 If you'd like mod explorer functionality, be sure to download, extract, and run the explorer in the same directory as run.py:
 https://github.com/shmakota/cataclysm_mod_explorer
