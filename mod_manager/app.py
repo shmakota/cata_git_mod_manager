@@ -1,5 +1,4 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
 import os
 import json
 import requests
@@ -11,6 +10,10 @@ import sys
 import logging
 import re
 
+from tkinter import filedialog, messagebox, simpledialog, ttk, Toplevel, Label
+from profile_dialog import ProfileManagerDialog
+from edit_mod_dialog import EditModDialog
+
 # Setup logging
 logging.basicConfig(
     filename='mod_debug.log',
@@ -19,15 +22,19 @@ logging.basicConfig(
 )
 
 # Constants
-PROFILES_FILE = "mod_profiles.json"
-CONFIG_FILE = "mod_manager_config.json"
-DEFAULT_MODS_DIR = "cdda/mods"
+PROFILES_FILE = "mod_manager/cfg/mod_profiles.json"
+CONFIG_FILE = "mod_manager/cfg/mod_manager_config.json"
+# It is not necessary to store files in this folder at all, just a default location for organization
+DEFAULT_MODS_DIR = "mods/cbn"
+
 
 
 class ModManagerApp:
+    version = "1.0.0"
+
     def __init__(self, root):
         self.root = root
-        self.root.title("Cataclysm Mod Manager")
+        self.root.title("Cataclysm Mod Manager v" + self.version)
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
 
@@ -584,16 +591,16 @@ class ModManagerApp:
         if not mods:
             messagebox.showinfo("Info", "No mods to update.", parent=self.root)
             return
-        #self._disable_ui()
+
+        # Show updating popup
+        self.update_popup = Toplevel(self.root)
+        self.update_popup.title("Updating Mods")
+        self.update_popup.geometry("300x100")
+        self.update_popup.transient(self.root)
+        self.update_popup.grab_set()
+        Label(self.update_popup, text="Updating...").pack(expand=True, pady=20)
+
         self.root.after(100, self._update_mods_worker)
-
-    def _disable_ui(self):
-        for child in self.frame.winfo_children():
-            child.configure(state="disabled")
-
-    def _enable_ui(self):
-        for child in self.frame.winfo_children():
-            child.configure(state="normal")
 
     def _update_mods_worker(self):
         mods = self._get_mods()
@@ -608,7 +615,9 @@ class ModManagerApp:
                 errors.append(f"{mod['url']}: {e}")
                 logging.error(f"Error updating mod {mod['url']}: {e}")
 
-        #self._enable_ui()
+        # Close the popup
+        self.update_popup.destroy()
+
         if errors:
             msg = "Some mods failed to update:\n" + "\n".join(errors)
             messagebox.showerror("Update Errors", msg, parent=self.root)
@@ -716,103 +725,3 @@ class ModManagerApp:
             subprocess.Popen(["./run_mod_viewer.sh", folder_path], cwd=os.getcwd())
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)
-
-
-
-
-class EditModDialog(tk.Toplevel):
-
-    def __init__(self, parent, url="", subdir="", keep_structure=False):
-        super().__init__(parent)
-        self.title("Edit Mod")
-        self.geometry("500x180")
-        self.result = None
-
-        self.url_var = tk.StringVar(value=url)
-        self.subdir_var = tk.StringVar(value=subdir)
-        self.keep_structure_var = tk.BooleanVar(value=keep_structure)
-
-        self._build_ui()
-
-        self.transient(parent)
-        self.grab_set()
-        self.wait_visibility()
-        self.focus()
-
-    def _build_ui(self):
-        frame = tk.Frame(self, padx=10, pady=10)
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(frame, text="GitHub ZIP URL:").grid(row=0, column=0, sticky="w")
-        tk.Entry(frame, textvariable=self.url_var, width=60).grid(row=0, column=1, sticky="ew", pady=5)
-
-        tk.Label(frame, text="Subdirectory (optional):").grid(row=1, column=0, sticky="w")
-        tk.Entry(frame, textvariable=self.subdir_var, width=60).grid(row=1, column=1, sticky="ew", pady=5)
-
-        tk.Checkbutton(frame, text="Keep original folder structure", variable=self.keep_structure_var).grid(row=2, column=1, sticky="w", pady=5)
-
-        btn_frame = tk.Frame(frame)
-        btn_frame.grid(row=3, column=0, columnspan=2, pady=10)
-
-        tk.Button(btn_frame, text="OK", width=10, command=self._on_ok).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Cancel", width=10, command=self.destroy).pack(side=tk.LEFT)
-
-        frame.grid_columnconfigure(1, weight=1)
-
-    def _on_ok(self):
-        url = self.url_var.get().strip()
-        if not url:
-            messagebox.showerror("Error", "URL cannot be empty.", parent=self)
-            return
-        subdir = self.subdir_var.get().strip()
-        keep_structure = self.keep_structure_var.get()
-        self.result = (url, subdir, keep_structure)
-        self.destroy()
-
-class ProfileManagerDialog(tk.Toplevel):
-    def __init__(self, parent, *, on_create, on_rename, on_delete, on_export, on_import, on_set_install_dir, current_profile_name=""):
-        super().__init__(parent)
-        self.on_set_install_dir = on_set_install_dir  # <-- THIS LINE is required!
-        self.title("Manage Profiles")
-        self.geometry("400x300")
-        self.transient(parent)
-        self.grab_set()
-
-        self.current_profile_name = current_profile_name
-
-        self._build_ui(on_create, on_rename, on_delete, on_export, on_import)
-
-        self.wait_visibility()
-        self.focus()
-
-    def _build_ui(self, on_create, on_rename, on_delete, on_export, on_import):
-        frame = tk.Frame(self, padx=10, pady=10)
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        profile_label_text = f"Current Profile: {self.current_profile_name}" if self.current_profile_name else "No Profile Selected"
-        self.profile_label = tk.Label(frame, text=profile_label_text, font=("Arial", 12, "bold"))
-        self.profile_label.pack(pady=(0, 10))
-
-        btn_frame = tk.Frame(frame)
-        btn_frame.pack()
-
-        for text, cmd in [("New", on_create),
-                        ("Rename", on_rename),
-                        ("Delete", on_delete),
-                        ("Export", on_export),
-                        ("Import", on_import)]:
-            tk.Button(btn_frame, text=text, command=cmd, width=15).pack(side=tk.TOP, fill=tk.X, pady=3)
-
-        tk.Button(frame, text="Set Install Directory", command=self.on_set_install_dir, width=15).pack(pady=(15, 0))
-
-
-
-    def update_profile_name(self, new_name):
-        self.current_profile_name = new_name
-        self.profile_label.config(text=f"Current Profile: {new_name}" if new_name else "No Profile Selected")
-
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = ModManagerApp(root)
-    root.mainloop()
