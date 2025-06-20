@@ -27,6 +27,10 @@ A mod management tool for **Cataclysm: Dark Days Ahead (CDDA)** and **Cataclysm:
 - Modpack creators looking to manage modular updates.
 - Developers or tinkerers who want to explore mod content in-depth.
 
+## Requirements
+
+Requires Python3 and tkinter.
+
 ## Installation
 
 Clone the repo and run the install/launch script. Setup your profile and install directory.
