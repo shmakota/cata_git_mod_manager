@@ -30,18 +30,22 @@ DEFAULT_MODS_DIR = "mods/cbn"
 
 
 class ModManagerApp:
-    version = "1.0.0"
+    # hopefully this is stable...
+    version = "1.0.2"
 
     def __init__(self, root):
         self.root = root
         self.root.title("Cataclysm Mod Manager v" + self.version)
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
+    
+        self._ensure_config_files_exist()
+        self.clear_log()
 
         self.mod_install_dir = DEFAULT_MODS_DIR
         self.profiles = {}
         self.current_profile = None
-
+        
         self._load_config()
         self._load_profiles()
 
@@ -57,7 +61,48 @@ class ModManagerApp:
         self._refresh_profile_combo()
         self._refresh_mod_list()
         self._refresh_installed_mods()
+    
+    def clear_log(self, log_file='mod_debug.log'):
+        """Clears the contents of the specified log file."""
+        with open(log_file, 'w'):
+            pass  # Just open in write mode to truncate the file
+        logging.info('Log file has been cleared.')
+    
+    def _ensure_config_files_exist(self):
+        # Ensure default mod directory exists
+        if not os.path.isdir(DEFAULT_MODS_DIR):
+            try:
+                os.makedirs(DEFAULT_MODS_DIR)
+                logging.info(f"Created default mod directory at: {DEFAULT_MODS_DIR}")
+            except Exception as e:
+                logging.error(f"Failed to create default mod directory: {e}")
 
+        # Ensure config file exists
+        if not os.path.isfile(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "w") as f:
+                    json.dump({"mod_install_dir": DEFAULT_MODS_DIR}, f, indent=2)
+                logging.info("Created config file with default mod path.")
+            except Exception as e:
+                logging.error(f"Failed to create config file: {e}")
+
+        # Ensure profiles file exists
+        profiles_dir = os.path.dirname(PROFILES_FILE)
+        if not os.path.isdir(profiles_dir):
+            try:
+                os.makedirs(profiles_dir)
+                logging.info(f"Created profiles directory at: {profiles_dir}")
+            except Exception as e:
+                logging.error(f"Failed to create profiles directory: {e}")
+
+        if not os.path.isfile(PROFILES_FILE):
+            try:
+                with open(PROFILES_FILE, "w") as f:
+                    json.dump({}, f, indent=2)  # Empty dict for initial profiles
+                logging.info(f"Created empty profiles file at: {PROFILES_FILE}")
+            except Exception as e:
+                logging.error(f"Failed to create profiles file: {e}")
+    
     # --- Config Management ---
     def _load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -485,7 +530,7 @@ class ModManagerApp:
     def _refresh_mod_list(self):
         self.listbox.delete(0, tk.END)
         for mod in self._get_mods():
-            keep_text = "Keep structure" if mod.get("keep_structure") else "Auto-detect"
+            keep_text = "Auto-detect" if mod.get("keep_structure") else "Keep structure"
             subdir = mod.get("subdir", "")
 
             url = mod['url']
@@ -515,7 +560,7 @@ class ModManagerApp:
             return
         url = self._fix_github_url(url)
         subdir = simpledialog.askstring("Subdirectory", "Enter mod subdirectory (optional):", parent=self.root) or ""
-        keep_structure = messagebox.askyesno("Keep Structure", "Keep original folder structure? (No = auto-detect modinfo.json)", parent=self.root)
+        keep_structure = messagebox.askyesno("Auto Detect", "Automatically find folder structure? (Yes = auto-detect modinfo.json)", parent=self.root)
         mods = self._get_mods()
         mods.append({"url": url, "subdir": subdir, "keep_structure": keep_structure})
         self._set_mods(mods)
@@ -627,7 +672,7 @@ class ModManagerApp:
     def _download_and_extract_mod(self, mod):
         url = mod.get("url")
         subdir = mod.get("subdir", "")
-        keep_structure = mod.get("keep_structure", False)
+        keep_structure = mod.get("keep_structure", True)
 
         if not url:
             raise ValueError("No URL provided for mod")
@@ -648,12 +693,6 @@ class ModManagerApp:
                     logging.info(f" - {name}")
 
                 if keep_structure:
-                    # Extract all files exactly as they are in the zip
-                    extract_path = os.path.join(self.mod_install_dir)
-                    zip_ref.extractall(extract_path)
-                    logging.info(f"Extracted entire archive with full structure to {extract_path}")
-
-                else:
                     # Define root inside zip to search for mods (all files under subdir if specified, else whole zip)
                     root_prefix = subdir.rstrip('/') + '/' if subdir else ""
 
@@ -692,6 +731,12 @@ class ModManagerApp:
 
                         logging.info(f"Extracted mod folder '{mod_folder}' as '{folder_name}' in {dest_folder}")
 
+                else:
+                    # Extract all files exactly as they are in the zip
+                    extract_path = os.path.join(self.mod_install_dir)
+                    zip_ref.extractall(extract_path)
+                    logging.info(f"Extracted entire archive with full structure to {extract_path}")
+
             logging.info(f"Mod {url} installed successfully.")
             self._refresh_installed_mods()
 
@@ -722,6 +767,11 @@ class ModManagerApp:
             return
 
         try:
-            subprocess.Popen(["./run_mod_viewer.sh", folder_path], cwd=os.getcwd())
+            if sys.platform.startswith("win"):
+                cmd = ["cmd.exe", "/c", "run_mod_viewer.bat", folder_path]
+            else:
+                cmd = ["bash", "run_mod_viewer.sh", folder_path]
+
+            subprocess.Popen(cmd, cwd=os.getcwd())
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)
