@@ -29,14 +29,13 @@ A mod management tool for **Cataclysm: Dark Days Ahead (CDDA)** and **Cataclysm:
 
 ## Requirements
 
-Requires Python3 and tkinter.
+Requires Python3, everything else should automatically be setup by the install script.
 
 ## Installation
 
 Clone the repo and run the install/launch script. Setup your profile and install directory.
 
-If you'd like mod explorer functionality, be sure to download, extract, and run the explorer in the same directory as run.py:
-https://github.com/shmakota/cataclysm_mod_explorer (these will most likely be packaged together soon)
+As of 1.0.2, mod explorer functionality is included by default in this repo and the mod explorer repo has been discontinued.
 
 ## Compatibility
 Should work fine with any fork of Cataclysm: Dark Days Ahead.
