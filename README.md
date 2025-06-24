@@ -1,8 +1,14 @@
 # Cataclysm Mod Manager
 
-A mod management tool for **Cataclysm: Dark Days Ahead (CDDA)** and **Cataclysm: Bright Nights (CBN)**.
+A mod management tool for **Cataclysm: Dark Days Ahead (CDDA)** and **Cataclysm: Bright Nights (CBN)**
 
-![image](https://github.com/user-attachments/assets/a49e923c-195a-4ef0-aa69-ebcc62e2aa43)
+<details>
+  <summary>📸 Click to view screenshots</summary>
+  
+  ![image](https://github.com/user-attachments/assets/fedd87ca-e452-442c-9e8f-6113992b2106)
+  ![image](https://github.com/user-attachments/assets/a85facb4-c834-415b-964c-ece3f928d6e7)
+
+</details>
 
 ## Features
 
