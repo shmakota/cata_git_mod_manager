@@ -30,16 +30,17 @@ DEFAULT_MODS_DIR = "mods"
 INSTALL_TYPE_DIRS = {
     "mod": "mods",
     "tileset": "gfx",
-    "soundpack": "sound"
+    "soundpack": "sound",
+    "font": "font"
 }
 
 class ModManagerApp:
-    # hopefully this is stable...
-    version = "1.0.2"
+    # unstable
+    version = "1.0.3"
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Cataclysm Mod Manager v" + self.version)
+        self.root.title("Cataclysm Content Manager v" + self.version)
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
     
@@ -353,7 +354,12 @@ class ModManagerApp:
         self.explanation_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
         self.folder_var = tk.StringVar(value="Mods")  # Use display name
-        folder_options = [("Mods", "mods"), ("Soundpacks", "sound"), ("Tilesets", "gfx")]
+        folder_options = [
+            ("Mods", "mods"),
+            ("Soundpacks", "sound"),
+            ("Tilesets", "gfx")
+            # ("Fonts", "font")  # Disabled for now
+        ]
         self.folder_map = {name: folder for name, folder in folder_options}
 
         dropdown_row = tk.Frame(self.frame)
@@ -756,12 +762,29 @@ class ModManagerApp:
                 f.write(response.content)
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                namelist = zip_ref.namelist()
                 logging.info("ZIP file contents:")
-                for name in zip_ref.namelist():
+                for name in namelist:
                     logging.info(f" - {name}")
 
-                root_prefix = mod_subdir.rstrip('/') + '/' if mod_subdir else ""
-                members = [m for m in zip_ref.namelist() if m.startswith(root_prefix)]
+                # Detect single top-level directory (e.g. modname-master/)
+                top_dirs = set()
+                for name in namelist:
+                    parts = name.split('/')
+                    if len(parts) > 1 and parts[0]:
+                        top_dirs.add(parts[0])
+                if len(top_dirs) == 1:
+                    top_dir = list(top_dirs)[0]
+                    logging.info(f"Detected single top-level directory in ZIP: {top_dir}")
+                    root_prefix = top_dir + '/'
+                else:
+                    root_prefix = ''
+
+                # If mod_subdir is set, move down into that subdir
+                if mod_subdir:
+                    root_prefix = root_prefix + mod_subdir.rstrip('/') + '/'
+
+                members = [m for m in namelist if m.startswith(root_prefix)]
 
                 if not members:
                     raise FileNotFoundError(f"No files found under '{mod_subdir}' in the archive")
@@ -779,7 +802,7 @@ class ModManagerApp:
                         with zip_ref.open(member) as source, open(target_file_path, "wb") as target:
                             shutil.copyfileobj(source, target)
 
-                logging.info(f"Extracted '{mod_subdir}' to '{base_install_dir}'")
+                logging.info(f"Extracted '{mod_subdir or root_prefix}' to '{base_install_dir}'")
 
         self._refresh_installed_mods()
 
