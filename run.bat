@@ -2,13 +2,13 @@
 SETLOCAL
 
 REM Check if virtual environment exists
-IF NOT EXIST "venv\" (
+IF NOT EXIST ".venv\" (
     echo Creating virtual environment...
-    python -m venv venv
+    python -m venv .venv
 )
 
 REM Activate the virtual environment
-CALL venv\Scripts\activate.bat
+CALL .venv\Scripts\activate.bat
 
 REM Install requests package
 pip install requests

@@ -735,10 +735,10 @@ class ModManagerApp:
     def _download_and_extract_mod(self, mod):
         url = mod.get("url")
         mod_subdir = mod.get("mod_subdir", mod.get("subdir", ""))  # support old 'subdir'
-        install_subdir = mod.get("install_subdir", "")
+        install_subdir = mod.get("install_subdir")
         keep_structure = mod.get("keep_structure", True)
 
-        # If install_subdir is blank or '.', always use <mod_install_dir>/mods
+        # If install_subdir is not defined, None, blank, or '.', always use <mod_install_dir>/mods
         if not install_subdir or install_subdir == ".":
             base_install_dir = os.path.join(os.path.abspath(self.mod_install_dir), "mods")
         else:
@@ -834,9 +834,9 @@ class ModManagerApp:
 
         try:
             if sys.platform.startswith("win"):
-                cmd = ["cmd.exe", "/c", "run_mod_viewer.bat", folder_path]
+                cmd = ["cmd.exe", "/c", "mod_manager/run_mod_viewer.bat", folder_path]
             else:
-                cmd = ["bash", "run_mod_viewer.sh", folder_path]
+                cmd = ["bash", "mod_manager/run_mod_viewer.sh", folder_path]
             subprocess.Popen(cmd, cwd=os.getcwd())
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)
