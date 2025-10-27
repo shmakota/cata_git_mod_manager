@@ -22,21 +22,20 @@ logging.basicConfig(
 )
 
 # Constants
-PROFILES_FILE = "mod_manager/cfg/mod_profiles.json"
-CONFIG_FILE = "mod_manager/cfg/mod_manager_config.json"
+PROFILES_FILE = "cfg/mod_profiles.json"
+CONFIG_FILE = "cfg/mod_manager_config.json"
 # It is not necessary to store files in this folder at all, just a default location for organization
 DEFAULT_MODS_DIR = "mods"
 
 INSTALL_TYPE_DIRS = {
     "mod": "mods",
     "tileset": "gfx",
-    "soundpack": "sound",
-    "font": "font"
+    "soundpack": "sound"
 }
 
 class ModManagerApp:
     # unstable
-    version = "1.0.3"
+    version = "1.0.5"
 
     def __init__(self, root):
         self.root = root
@@ -137,8 +136,10 @@ class ModManagerApp:
                 self.profiles = data.get("profiles", {})
                 self.current_profile = data.get("current_profile")
                 self._convert_old_profiles()
+                self._migrate_absolute_paths_to_relative()
                 if self.current_profile in self.profiles:
-                    self.mod_install_dir = self.profiles[self.current_profile].get("mod_install_dir", DEFAULT_MODS_DIR)
+                    rel_path = self.profiles[self.current_profile].get("mod_install_dir", DEFAULT_MODS_DIR)
+                    self.mod_install_dir = self._resolve_install_dir(rel_path)
                 logging.info("Profiles loaded successfully.")
             except Exception as e:
                 logging.error(f"Error loading profiles: {e}")
@@ -153,9 +154,10 @@ class ModManagerApp:
         if self.current_profile in self.profiles:
             profile = self.profiles[self.current_profile]
             if isinstance(profile, dict):
-                profile["mod_install_dir"] = self.mod_install_dir
+                # Save as relative path
+                profile["mod_install_dir"] = self._make_path_relative(self.mod_install_dir)
             else:
-                self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": self.mod_install_dir}
+                self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": self._make_path_relative(self.mod_install_dir)}
 
         try:
             with open(PROFILES_FILE, "w") as f:
@@ -169,6 +171,48 @@ class ModManagerApp:
         for name, pdata in list(self.profiles.items()):
             if isinstance(pdata, list):
                 self.profiles[name] = {"mods": pdata, "mod_install_dir": DEFAULT_MODS_DIR}
+    
+    def _migrate_absolute_paths_to_relative(self):
+        """Convert absolute paths to relative paths for portability"""
+        cwd = os.getcwd()
+        for name, profile in self.profiles.items():
+            if isinstance(profile, dict):
+                old_path = profile.get("mod_install_dir", "")
+                if old_path and os.path.isabs(old_path):
+                    # Convert absolute path to relative
+                    try:
+                        rel_path = os.path.relpath(old_path, cwd)
+                        # If the relative path would go outside the project, keep it as is
+                        if not rel_path.startswith('..'):
+                            profile["mod_install_dir"] = rel_path
+                            logging.info(f"Migrated absolute path '{old_path}' to relative '{rel_path}' for profile '{name}'")
+                    except ValueError:
+                        # Paths on different drives on Windows, keep absolute
+                        logging.warning(f"Could not convert path '{old_path}' to relative, keeping absolute")
+    
+    def _make_path_relative(self, path):
+        """Convert a path to relative if it's within the project directory"""
+        if not path or not os.path.isabs(path):
+            return path
+        cwd = os.getcwd()
+        try:
+            rel_path = os.path.relpath(path, cwd)
+            # If the relative path would go outside the project, keep absolute
+            if rel_path.startswith('..'):
+                return path
+            return rel_path
+        except ValueError:
+            # Different drives on Windows, keep absolute
+            return path
+    
+    def _resolve_install_dir(self, path):
+        """Resolve a path (relative or absolute) to absolute for use"""
+        if not path:
+            return DEFAULT_MODS_DIR
+        if os.path.isabs(path):
+            return path
+        # Make relative paths absolute relative to current working directory
+        return os.path.abspath(path)
     
     def _export_profile(self):
         if not self.current_profile:
@@ -357,8 +401,8 @@ class ModManagerApp:
         folder_options = [
             ("Mods", "mods"),
             ("Soundpacks", "sound"),
-            ("Tilesets", "gfx")
-            # ("Fonts", "font")  # Disabled for now
+            ("Tilesets", "gfx"),
+            ("Fonts", "font")
         ]
         self.folder_map = {name: folder for name, folder in folder_options}
 
@@ -388,6 +432,15 @@ class ModManagerApp:
         # Listbox itself
         self.listbox = tk.Listbox(listbox_container, width=50, height=20, activestyle='none', xscrollcommand=lambda *args: h_scrollbar.set(*args), yscrollcommand=lambda *args: v_scrollbar.set(*args))
         self.listbox.grid(row=0, column=0, sticky="nsew")
+        
+        # Bind hover events for scrolling
+        self.listbox.bind("<Enter>", self._on_listbox_enter)
+        self.listbox.bind("<Leave>", self._on_listbox_leave)
+        self.listbox.bind("<Motion>", self._on_listbox_motion)
+        self.hover_after_id = None
+        self.scrolling_index = -1  # Track which item is currently scrolling
+        self.original_text = ""  # Store the original text of scrolling item
+        self.scroll_offset = 0
 
         # Vertical scrollbar
         v_scrollbar = ttk.Scrollbar(listbox_container, orient=tk.VERTICAL, command=self.listbox.yview)
@@ -545,7 +598,8 @@ class ModManagerApp:
             self.current_profile = selected
             profile = self.profiles.get(self.current_profile, {})
             if isinstance(profile, dict):
-                self.mod_install_dir = profile.get("mod_install_dir", DEFAULT_MODS_DIR)
+                rel_path = profile.get("mod_install_dir", DEFAULT_MODS_DIR)
+                self.mod_install_dir = self._resolve_install_dir(rel_path)
             else:
                 self.mod_install_dir = DEFAULT_MODS_DIR
             self._save_profiles()
@@ -578,7 +632,8 @@ class ModManagerApp:
         self.listbox.delete(0, tk.END)
         for mod in self._get_mods():
             keep_text = "Auto-detect" if mod.get("keep_structure") else "Keep structure"
-            subdir = mod.get("subdir", "")
+            mod_subdir = mod.get("mod_subdir", mod.get("subdir", ""))
+            install_subdir = mod.get("install_subdir", "")
 
             url = mod['url']
             clean_url = url  # default fallback
@@ -591,8 +646,117 @@ class ModManagerApp:
                 user, repo, ref = github_zip.groups()
                 clean_url = f"{user}/{repo}"
 
-            display = f"{clean_url}  |  subdir: {subdir}  |  {keep_text}"
+            display = f"{clean_url}"
+            if mod_subdir:
+                display += f"  |  mod subdir: {mod_subdir}"
+            if install_subdir:
+                display += f"  |  install dir: {install_subdir}"
+            display += f"  |  {keep_text}"
             self.listbox.insert(tk.END, display)
+
+    def _on_listbox_enter(self, event):
+        """Called when mouse enters listbox"""
+        pass
+
+    def _on_listbox_leave(self, event):
+        """Called when mouse leaves listbox - restore original text"""
+        self._stop_scrolling()
+
+    def _on_listbox_motion(self, event):
+        """Called when mouse moves over listbox - implements scrolling on hover"""
+        # Get the item under the cursor
+        index = self.listbox.nearest(event.y)
+        if index == -1:
+            self._stop_scrolling()
+            return
+        
+        # Get the text of the item
+        try:
+            text = self.listbox.get(index)
+        except:
+            self._stop_scrolling()
+            return
+        
+        # If we're already scrolling this item, don't restart
+        if self.scrolling_index == index:
+            return
+        
+        # Stop previous scroll if any
+        self._stop_scrolling()
+        
+        # Check if text is longer than what fits in the listbox
+        bbox = self.listbox.bbox(index)
+        if not bbox:
+            return
+        
+        # Estimate text width (approximate: ~8 pixels per character in monospace)
+        text_width = len(text) * 8
+        visible_width = bbox[2]
+        
+        # If text is longer than visible width, enable scrolling
+        if text_width > visible_width:
+            self._start_hover_scroll(index, text)
+
+    def _stop_scrolling(self):
+        """Stop the current scrolling and restore original text"""
+        if self.hover_after_id:
+            self.root.after_cancel(self.hover_after_id)
+            self.hover_after_id = None
+        
+        # Restore original text if we were scrolling
+        if self.scrolling_index >= 0 and self.original_text and self.scrolling_index < self.listbox.size():
+            selection = self.listbox.curselection()
+            self.listbox.delete(self.scrolling_index)
+            self.listbox.insert(self.scrolling_index, self.original_text)
+            # Restore selection if there was one
+            if selection and len(selection) > 0:
+                self.listbox.selection_set(selection[0])
+        
+        self.scrolling_index = -1
+        self.original_text = ""
+        self.scroll_offset = 0
+
+    def _start_hover_scroll(self, index, text):
+        """Start the marquee scrolling effect - text cycles like a radio display"""
+        self.scrolling_index = index
+        self.original_text = text
+        self.scroll_offset = 0
+        
+        # Create extended text with spaces for smooth circular scrolling
+        space_padding = " " * 15
+        scrolling_text = text + space_padding + text
+        
+        def scroll():
+            if self.hover_after_id is None:
+                return
+            
+            # Create the display string by rotating the text
+            # Take a substring starting at offset
+            display_text = scrolling_text[self.scroll_offset : self.scroll_offset + len(text)]
+            
+            # If we're near the end, wrap around
+            if len(display_text) < len(text):
+                remaining = len(text) - len(display_text)
+                display_text += scrolling_text[:remaining]
+            
+            # Update just this item by deleting and reinserting at the same position
+            if self.scrolling_index < self.listbox.size():
+                selection = self.listbox.curselection()
+                self.listbox.delete(self.scrolling_index)
+                self.listbox.insert(self.scrolling_index, display_text)
+                # Restore selection if there was one
+                if selection and len(selection) > 0:
+                    self.listbox.selection_set(selection[0])
+            
+            # Increment offset for next frame (loop back to start)
+            total_len = len(scrolling_text)
+            self.scroll_offset = (self.scroll_offset + 1) % total_len
+            
+            # Schedule next scroll
+            self.hover_after_id = self.root.after(80, scroll)
+        
+        # Start scrolling
+        self.hover_after_id = self.root.after(80, scroll)
 
     def _fix_github_url(self, url):
         url = url.rstrip('/')
@@ -671,9 +835,9 @@ class ModManagerApp:
             if self.current_profile and self.current_profile in self.profiles:
                 profile = self.profiles[self.current_profile]
                 if isinstance(profile, dict):
-                    profile["mod_install_dir"] = new_dir
+                    profile["mod_install_dir"] = self._make_path_relative(new_dir)
                 else:
-                    self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": new_dir}
+                    self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": self._make_path_relative(new_dir)}
                 self._save_profiles()
 
             # If dialog open, update any UI if needed (example: update profile label)
@@ -703,34 +867,60 @@ class ModManagerApp:
         # Show updating popup
         self.update_popup = Toplevel(self.root)
         self.update_popup.title("Updating Mods")
-        self.update_popup.geometry("300x100")
+        self.update_popup.geometry("400x150")
         self.update_popup.transient(self.root)
         self.update_popup.grab_set()
-        Label(self.update_popup, text="Updating...").pack(expand=True, pady=20)
+        
+        self.update_status_label = Label(self.update_popup, text="Updating...", wraplength=350)
+        self.update_status_label.pack(expand=True, pady=20)
 
         self.root.after(100, self._update_mods_worker)
 
-    def _update_mods_worker(self):
+    def _update_mods_worker(self, mod_index=0, errors=None, success_count=0):
+        """Recursively update mods with delays between each one"""
+        if errors is None:
+            errors = []
+        
         mods = self._get_mods()
-        errors = []
-        success_count = 0
+        
+        if mod_index >= len(mods):
+            # Close the popup
+            self.update_popup.destroy()
 
-        for mod in mods:
-            try:
-                self._download_and_extract_mod(mod)
-                success_count += 1
-            except Exception as e:
-                errors.append(f"{mod['url']}: {e}")
-                logging.error(f"Error updating mod {mod['url']}: {e}")
-
-        # Close the popup
-        self.update_popup.destroy()
-
-        if errors:
-            msg = "Some mods failed to update:\n" + "\n".join(errors)
-            messagebox.showerror("Update Errors", msg, parent=self.root)
-        else:
-            messagebox.showinfo("Update Complete", f"Successfully updated {success_count} mods.", parent=self.root)
+            if errors:
+                msg = "Some mods failed to update:\n" + "\n".join(errors)
+                messagebox.showerror("Update Errors", msg, parent=self.root)
+            else:
+                messagebox.showinfo("Update Complete", f"Successfully updated {success_count} mods.", parent=self.root)
+            return
+        
+        mod = mods[mod_index]
+        
+        # Update status label
+        mod_name = self._get_mod_display_name(mod)
+        self.update_status_label.config(text=f"Updating... ({mod_index+1}/{len(mods)})\n{mod_name}")
+        self.update_popup.update()
+        
+        try:
+            self._download_and_extract_mod(mod)
+            success_count += 1
+        except Exception as e:
+            errors.append(f"{mod['url']}: {e}")
+            logging.error(f"Error updating mod {mod['url']}: {e}")
+        
+        # Schedule the next mod update after 50ms delay
+        self.root.after(50, lambda: self._update_mods_worker(mod_index + 1, errors, success_count))
+    
+    def _get_mod_display_name(self, mod):
+        """Extract a clean display name from a mod entry"""
+        url = mod['url']
+        github_zip = re.match(
+            r"https?://github\.com/([^/]+)/([^/]+)/archive/(?:refs/(?:heads|tags)/)?([^/]+)\.zip", url
+        )
+        if github_zip:
+            user, repo, ref = github_zip.groups()
+            return f"{user}/{repo}"
+        return url
     
     def _download_and_extract_mod(self, mod):
         url = mod.get("url")
@@ -834,9 +1024,13 @@ class ModManagerApp:
 
         try:
             if sys.platform.startswith("win"):
-                cmd = ["cmd.exe", "/c", "mod_manager/run_mod_viewer.bat", folder_path]
+                # Use os.path.normpath to normalize the path for Windows
+                normalized_path = os.path.normpath(folder_path)
+                batch_file = os.path.join("mod_manager", "run_mod_viewer.bat")
+                cmd = ["cmd.exe", "/c", batch_file, normalized_path]
             else:
-                cmd = ["bash", "mod_manager/run_mod_viewer.sh", folder_path]
+                batch_file = os.path.join("mod_manager", "run_mod_viewer.sh")
+                cmd = ["bash", batch_file, folder_path]
             subprocess.Popen(cmd, cwd=os.getcwd())
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)

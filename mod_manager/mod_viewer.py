@@ -240,39 +240,14 @@ class ModViewerApp(tk.Tk):
         system = platform.system()
         try:
             if system == "Windows":
-                subprocess.run(["explorer", path])
+                subprocess.Popen(["explorer", path])
             elif system == "Darwin":  # macOS
-                subprocess.run(["open", path])
+                subprocess.Popen(["open", path])
             else:  # Linux and others
-                subprocess.run(["xdg-open", path])
+                subprocess.Popen(["xdg-open", path])
         except Exception as e:
             print(f"[!] Failed to open path {path}: {e}")
 
-    def on_select(self, event):
-        selected = self.tree.selection()
-        print(f"Selection changed: {selected}")
-
-        entry = self.filtered_data[idx]
-        self.detail_text.delete(1.0, tk.END)
-
-        if self.use_new_order.get():
-            lines = [
-                f"Name: {entry.get('name', '')}",
-                f"Description:\n{entry.get('description', '')}\n",
-                f"ID: {entry['id']}",
-                f"Type: {entry['type']}\n"
-            ]
-        else:
-            lines = [
-                f"Type: {entry['type']}",
-                f"ID: {entry['id']}",
-                f"Name: {entry.get('name', '')}",
-                f"Description:\n{entry.get('description', '')}\n"
-            ]
-
-        lines.append(f"File: {entry['file']}\n")
-        lines.append(json.dumps(entry['full'], indent=2))
-        self.detail_text.insert(tk.END, "\n".join(lines))
 
 
     def update_filter(self, *_):

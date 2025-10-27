@@ -11,7 +11,7 @@ import webbrowser
 import re
 import json
 
-CONFIG_FILE = os.path.join("mod_manager", "cfg", "mod_manager_config.json")
+CONFIG_FILE = os.path.join("cfg", "mod_manager_config.json")
 DEFAULT_INSTALL_DIR = os.path.join(os.getcwd(), "cataclysmbn-unstable")
 
 def load_and_update_config():
@@ -23,9 +23,10 @@ def load_and_update_config():
                 config = json.load(f)
         except Exception:
             config = {}
-    # Ensure mod_install_dir is present
-    if "mod_install_dir" not in config or not config["mod_install_dir"]:
-        config["mod_install_dir"] = DEFAULT_INSTALL_DIR
+    # Ensure game_install_dir is present (launcher uses this for game installation)
+    if "game_install_dir" not in config or not config["game_install_dir"]:
+        # Use DEFAULT_INSTALL_DIR as the game installation directory
+        config["game_install_dir"] = DEFAULT_INSTALL_DIR
         changed = True
     if changed:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -34,9 +35,11 @@ def load_and_update_config():
     return config
 
 config = load_and_update_config()
-INSTALL_DIR = os.path.abspath(config["mod_install_dir"])
+# Use game_install_dir for installing the game itself
+INSTALL_DIR = os.path.abspath(config.get("game_install_dir", DEFAULT_INSTALL_DIR))
 
 GITHUB_API = "https://api.github.com/repos/cataclysmbnteam/Cataclysm-BN/releases"
+EXPERIMENTAL_API = "https://api.github.com/repos/cataclysmbnteam/Cataclysm-BN/releases/tags/experimental"
 
 
 class CataInstallerApp:
@@ -47,10 +50,16 @@ class CataInstallerApp:
 
         self.releases = []
         self.selected_release = None
+        self.use_experimental = tk.BooleanVar(value=False)
+
+        # Experimental toggle
+        exp_frame = tk.Frame(root)
+        exp_frame.pack(padx=10, pady=(10, 5))
+        tk.Checkbutton(exp_frame, text="Show Experimental Build", variable=self.use_experimental, command=self.toggle_experimental).pack(side=tk.LEFT)
 
         # Dropdown
         self.dropdown = ttk.Combobox(root, state="readonly", width=60)
-        self.dropdown.pack(padx=10, pady=(10, 5))
+        self.dropdown.pack(padx=10, pady=(5, 10))
 
         # Buttons
         btn_frame = tk.Frame(root)
@@ -93,9 +102,15 @@ class CataInstallerApp:
 
     def fetch_releases(self):
         try:
-            response = requests.get(GITHUB_API)
-            response.raise_for_status()
-            all_releases = response.json()
+            if self.use_experimental.get():
+                response = requests.get(EXPERIMENTAL_API)
+                response.raise_for_status()
+                release_data = response.json()
+                all_releases = [release_data]  # Wrap single release in list
+            else:
+                response = requests.get(GITHUB_API)
+                response.raise_for_status()
+                all_releases = response.json()
 
             system = platform.system().lower()
             ext = ".zip" if "windows" in system else ".tar.gz"
@@ -105,7 +120,13 @@ class CataInstallerApp:
             for release in all_releases:
                 for asset in release.get("assets", []):
                     name = asset["name"].lower()
+                    # Check for tiles build and skip experimental unless checkbox is on
+                    is_experimental = "experimental" in name
                     if name.endswith(ext) and keyword in name and "tiles" in name:
+                        if not self.use_experimental.get() and is_experimental:
+                            continue
+                        if self.use_experimental.get() and not is_experimental:
+                            continue
                         filtered.append({
                             "name": release["name"],
                             "description": release.get("body", "No changelog available."),
@@ -121,6 +142,9 @@ class CataInstallerApp:
                 self.dropdown.bind("<<ComboboxSelected>>", self.on_select)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to fetch releases:\n{e}")
+    
+    def toggle_experimental(self):
+        self.fetch_releases()
 
     def on_select(self, event):
         idx = self.dropdown.current()
@@ -207,9 +231,26 @@ class CataInstallerApp:
 
             if name.endswith(".zip"):
                 with ZipFile(data) as zipf:
-                    for member in zipf.namelist():
-                        parts = member.split('/', 1)
-                        target_path = parts[1] if len(parts) > 1 else parts[0]
+                    members = zipf.namelist()
+                    # Strip both the archive wrapper (like "cataclysmbn-unstable-master")
+                    # and any nested "cataclysmbn-unstable" folder
+                    for member in members:
+                        parts = member.split('/')
+                        # Remove empty parts and filter out the first directory (usually the archive name)
+                        filtered_parts = [p for p in parts if p]  # Remove empty strings
+                        
+                        if len(filtered_parts) <= 1:
+                            continue
+                        
+                        # Skip the first part (archive name like "cataclysmbn-unstable-master")
+                        # and also skip 'cataclysmbn-unstable' if it's nested
+                        target_parts = filtered_parts[1:]
+                        if len(target_parts) > 0 and target_parts[0] == 'cataclysmbn-unstable':
+                            target_parts = target_parts[1:]
+                        
+                        target_path = '/'.join(target_parts)
+                        if not target_path:
+                            continue
                         dest = os.path.join(INSTALL_DIR, target_path)
                         if member.endswith('/'):
                             os.makedirs(dest, exist_ok=True)
@@ -220,12 +261,21 @@ class CataInstallerApp:
             elif name.endswith(".tar.gz"):
                 with tarfile.open(fileobj=data, mode="r:gz") as tarf:
                     for member in tarf.getmembers():
-                        path_parts = member.name.split('/', 1)
-                        if len(path_parts) > 1:
-                            member.name = path_parts[1]
-                        else:
-                            member.name = path_parts[0]
-                        tarf.extract(member, INSTALL_DIR)
+                        parts = member.name.split('/')
+                        # Remove empty parts
+                        filtered_parts = [p for p in parts if p]
+                        
+                        if len(filtered_parts) <= 1:
+                            continue
+                        
+                        # Skip the first part (archive name) and also skip 'cataclysmbn-unstable' if nested
+                        target_parts = filtered_parts[1:]
+                        if len(target_parts) > 0 and target_parts[0] == 'cataclysmbn-unstable':
+                            target_parts = target_parts[1:]
+                        
+                        if target_parts:
+                            member.name = '/'.join(target_parts)
+                            tarf.extract(member, INSTALL_DIR)
             else:
                 raise ValueError("Unsupported archive format.")
 

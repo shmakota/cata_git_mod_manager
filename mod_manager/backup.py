@@ -7,7 +7,7 @@ import time
 import json
 from datetime import datetime
 
-CONFIG_FILE = os.path.join("mod_manager", "cfg", "mod_manager_config.json")
+CONFIG_FILE = os.path.join("cfg", "mod_manager_config.json")
 DEFAULT_BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'backup')
 
 def get_backup_dir():

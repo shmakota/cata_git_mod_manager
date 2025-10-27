@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "default": {
+      "mods": [],
+      "mod_install_dir": "cataclysmbn-unstable"
+    }
+  },
+  "current_profile": "default"
+}
