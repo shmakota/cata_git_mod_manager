@@ -1,0 +1,78 @@
+{
+  "profiles": {
+    "default": {
+      "mods": [
+        {
+          "url": "https://github.com/Theawesomeboophis/UndeadPeopleTileset/releases/download/6%2F30%2F2025/Sprinkles.zip",
+          "mod_subdir": "gfx",
+          "install_subdir": "gfx",
+          "keep_structure": true
+        },
+        {
+          "url": "https://github.com/Theawesomeboophis/UndeadPeopleTileset/releases/download/6%2F30%2F2025/Sprinkles.zip",
+          "mod_subdir": "data",
+          "install_subdir": "data",
+          "keep_structure": false
+        }
+      ],
+      "mod_install_dir": "/home/soda/Documents/GitHub/cata_backup/cataclysmbn-unstable/mods"
+    },
+    "soda-bn": {
+      "mods": [
+        {
+          "url": "https://github.com/shmakota/Material-Plants/archive/refs/heads/master.zip",
+          "subdir": "",
+          "keep_structure": false,
+          "is_modpack": false
+        },
+        {
+          "url": "https://github.com/shmakota/Bim-Jakker-Food-Buckets/archive/refs/heads/master.zip",
+          "subdir": "",
+          "keep_structure": false,
+          "is_modpack": false
+        },
+        {
+          "url": "https://github.com/Zlorthishen/The_Arcology_Mod/archive/refs/heads/master.zip",
+          "subdir": "",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/Zlorthishen/Really_Dark_Skies/archive/refs/heads/master.zip",
+          "subdir": "",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/Zlorthishen/cdda-arcana-mod/archive/refs/heads/master.zip",
+          "subdir": "",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/chaosvolt/cdda-tankmod-revived-mod/archive/refs/heads/master.zip",
+          "mod_subdir": "cdda-tankmod-revived-mod-master/Tankmod_Revived_BN",
+          "install_subdir": "",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/Theawesomeboophis/UndeadPeopleTileset/releases/download/6%2F30%2F2025/Sprinkles.zip",
+          "mod_subdir": "gfx",
+          "install_subdir": "gfx",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/RoyalFox2140/Otopack-2-BN/archive/refs/heads/master.zip",
+          "mod_subdir": "",
+          "install_subdir": "sound",
+          "keep_structure": false
+        },
+        {
+          "url": "https://github.com/githubnext/monaspace/releases/download/v1.200/monaspace-v1.200.zip",
+          "mod_subdir": "monaspace-v1.200/fonts/frozen",
+          "install_subdir": "font",
+          "keep_structure": false
+        }
+      ],
+      "mod_install_dir": "/home/soda/Documents/GitHub/cata_backup/cataclysmbn-unstable"
+    }
+  },
+  "current_profile": "soda-bn"
+}

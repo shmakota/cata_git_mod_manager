@@ -25,17 +25,22 @@ logging.basicConfig(
 PROFILES_FILE = "mod_manager/cfg/mod_profiles.json"
 CONFIG_FILE = "mod_manager/cfg/mod_manager_config.json"
 # It is not necessary to store files in this folder at all, just a default location for organization
-DEFAULT_MODS_DIR = "mods/cbn"
+DEFAULT_MODS_DIR = "mods"
 
-
+INSTALL_TYPE_DIRS = {
+    "mod": "mods",
+    "tileset": "gfx",
+    "soundpack": "sound",
+    "font": "font"
+}
 
 class ModManagerApp:
-    # hopefully this is stable...
-    version = "1.0.2"
+    # unstable
+    version = "1.0.3"
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Cataclysm Mod Manager v" + self.version)
+        self.root.title("Cataclysm Content Manager v" + self.version)
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
     
@@ -262,10 +267,14 @@ class ModManagerApp:
 
     def _refresh_installed_mods(self):
         self.installed_listbox.delete(0, tk.END)
-        if not os.path.isdir(self.mod_install_dir):
+        folder_path = self._get_installed_folder_base()
+        print(f"Listing installed mods in: {folder_path}")  # DEBUG
+        if not os.path.isdir(folder_path):
+            print(f"Directory does not exist: {folder_path}")  # DEBUG
             return
         try:
-            entries = sorted([d for d in os.listdir(self.mod_install_dir) if os.path.isdir(os.path.join(self.mod_install_dir, d))])
+            entries = sorted([d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))])
+            print(f"Entries found: {entries}")  # DEBUG
             for folder in entries:
                 self.installed_listbox.insert(tk.END, folder)
         except Exception as e:
@@ -274,47 +283,44 @@ class ModManagerApp:
     def _delete_installed_mod(self):
         selected = self.installed_listbox.curselection()
         if not selected:
-            messagebox.showwarning("No Selection", "Select an installed mod folder to delete.", parent=self.root)
+            messagebox.showwarning("No Selection", "Select an installed folder to delete.", parent=self.root)
             return
 
         index = selected[0]
         folder_name = self.installed_listbox.get(index)
-        folder_path = os.path.join(self.mod_install_dir, folder_name)
+        folder_path = self._get_installed_folder_path(folder_name)
 
-        confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete installed mod folder:\n{folder_name}?", parent=self.root)
+        confirm = messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete folder:\n{folder_name}?", parent=self.root)
         if not confirm:
             return
 
         try:
-            # Use shutil.rmtree to delete the folder and all its contents
-            import shutil
             shutil.rmtree(folder_path)
-            messagebox.showinfo("Deleted", f"Deleted installed mod folder: {folder_name}", parent=self.root)
+            messagebox.showinfo("Deleted", f"Deleted folder: {folder_name}", parent=self.root)
             self._refresh_installed_mods()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete folder:\n{e}", parent=self.root)
-    
 
     def _open_installed_mod_folder(self):
         selected = self.installed_listbox.curselection()
         if not selected:
-            messagebox.showwarning("No Selection", "Select an installed mod folder to open.", parent=self.root)
+            messagebox.showwarning("No Selection", "Select an installed folder to open.", parent=self.root)
             return
 
         index = selected[0]
         folder_name = self.installed_listbox.get(index)
-        folder_path = os.path.join(self.mod_install_dir, folder_name)
+        folder_path = self._get_installed_folder_path(folder_name)
 
         if not os.path.exists(folder_path):
             messagebox.showerror("Error", f"Folder does not exist:\n{folder_path}", parent=self.root)
             return
 
         try:
-            if sys.platform == "win32":
+            if sys.platform.startswith("win"):
                 os.startfile(folder_path)
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", folder_path])
-            else:  # Linux and others
+            else:
                 subprocess.Popen(["xdg-open", folder_path])
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open folder:\n{e}", parent=self.root)
@@ -346,6 +352,28 @@ class ModManagerApp:
         )
         self.explanation_label = tk.Label(self.frame, text=explanation, justify="left", wraplength=800)
         self.explanation_label.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+        self.folder_var = tk.StringVar(value="Mods")  # Use display name
+        folder_options = [
+            ("Mods", "mods"),
+            ("Soundpacks", "sound"),
+            ("Tilesets", "gfx")
+            # ("Fonts", "font")  # Disabled for now
+        ]
+        self.folder_map = {name: folder for name, folder in folder_options}
+
+        dropdown_row = tk.Frame(self.frame)
+        dropdown_row.grid(row=1, column=1, sticky="e", padx=(0, 10), pady=(0, 0))
+        tk.Label(dropdown_row, text="Installed Folder:").pack(side=tk.LEFT)
+        folder_dropdown = ttk.Combobox(
+            dropdown_row,
+            textvariable=self.folder_var,
+            values=[name for name, _ in folder_options],
+            state="readonly",
+            width=15
+        )
+        folder_dropdown.pack(side=tk.LEFT, padx=(5, 0))
+        folder_dropdown.bind("<<ComboboxSelected>>", lambda e: self._refresh_installed_mods())
 
         # GitHub Mods List (left)
         listbox_frame = tk.Frame(self.frame)
@@ -391,47 +419,58 @@ class ModManagerApp:
 
         # Installed Mods list (right)
         installed_mods_frame = tk.Frame(self.frame)
-        installed_mods_frame.grid(row=2, column=1, rowspan=2, sticky="nsew", padx=(10, 0))  # rowspan=2 is key
+        installed_mods_frame.grid(row=2, column=1, rowspan=2, sticky="nsew", padx=(10, 0))
 
-        tk.Label(installed_mods_frame, text="Installed Mods:").pack(anchor="w")
+        # Label
+        tk.Label(installed_mods_frame, text="Installed Mods:").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 0))
 
+        # List container (this should expand)
         installed_list_container = tk.Frame(installed_mods_frame)
-        installed_list_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
+        installed_list_container.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.installed_listbox = tk.Listbox(installed_list_container, width=40, height=20, activestyle='none')
         self.installed_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
         installed_scrollbar = ttk.Scrollbar(installed_list_container, orient=tk.VERTICAL, command=self.installed_listbox.yview)
         installed_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.installed_listbox.config(yscrollcommand=installed_scrollbar.set)
 
+        # BUTTONS: Always visible, flush with left box
         button_frame = tk.Frame(installed_mods_frame)
-        button_frame.pack(pady=(5, 0), fill=tk.X)
-
+        button_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
         self.installed_button = tk.Button(button_frame, text="Delete", command=self._delete_installed_mod)
-        self.installed_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-
+        self.installed_button.grid(row=0, column=0, sticky="ew", padx=5)
         self.open_folder_button = tk.Button(button_frame, text="Open Folder", command=self._open_installed_mod_folder)
-        self.open_folder_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-
+        self.open_folder_button.grid(row=0, column=1, sticky="ew", padx=5)
         self.refresh_installed_button = tk.Button(button_frame, text="Refresh", command=self._refresh_installed_mods)
-        self.refresh_installed_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
-
+        self.refresh_installed_button.grid(row=0, column=2, sticky="ew", padx=5)
         self.explore_button = tk.Button(button_frame, text="Explore", command=self._run_mod_viewer)
-        self.explore_button.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=5)
+        self.explore_button.grid(row=0, column=3, sticky="ew", padx=5)
+        for i in range(4):
+            button_frame.grid_columnconfigure(i, weight=1)
 
-        # Bottom — Open Mod Folder (spans both columns)
-        open_mod_btn_frame = tk.Frame(self.frame)
-        open_mod_btn_frame.grid(row=4, column=0, columnspan=2, pady=10, sticky="ew")
-        open_mod_btn = tk.Button(open_mod_btn_frame, text="Open Mod Folder", command=self._open_mod_folder)
-        open_mod_btn.pack(fill=tk.X)
+        # Make sure installed_mods_frame expands
+        installed_mods_frame.grid_rowconfigure(1, weight=1)  # Only the list container expands
+        installed_mods_frame.grid_rowconfigure(2, weight=0)  # Buttons do not expand
+        installed_mods_frame.grid_columnconfigure(0, weight=1)
+        installed_mods_frame.grid_columnconfigure(1, weight=1)
 
-        # Grid weight config for resizing
-        self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, weight=1)
+        # Make sure the main frame expands both columns
         self.frame.grid_rowconfigure(2, weight=1)
         self.frame.grid_columnconfigure(0, weight=1)
-        self.frame.grid_columnconfigure(1, weight=0)
+        self.frame.grid_columnconfigure(1, weight=1)
+
+        # Ensure root grid expands
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
+        # Bottom frame for Open Root Folder button
+        bottom_frame = tk.Frame(self.frame)
+        bottom_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        open_root_btn = tk.Button(
+            bottom_frame,
+            text="Open Root Folder",
+            command=self._open_root_folder
+        )
+        open_root_btn.pack(fill="x", expand=True)
 
     # --- Profile Methods ---
     def _create_profile(self, default_name=None):
@@ -519,6 +558,14 @@ class ModManagerApp:
             return profile.get("mods", [])
         return profile  # support old format
 
+    def _get_install_dir(self, mod):
+        install_type = mod.get("install_type", "mod")
+        # Use profile's mod_install_dir for mods, else use default for tileset/soundpack
+        if install_type == "mod":
+            return self.mod_install_dir
+        else:
+            return INSTALL_TYPE_DIRS.get(install_type, self.mod_install_dir)
+
     def _set_mods(self, mods):
         profile = self.profiles.get(self.current_profile, {})
         if isinstance(profile, dict):
@@ -555,17 +602,21 @@ class ModManagerApp:
 
 
     def _add_mod(self):
-        url = simpledialog.askstring("GitHub URL", "Enter GitHub ZIP URL:", parent=self.root)
-        if not url:
-            return
-        url = self._fix_github_url(url)
-        subdir = simpledialog.askstring("Subdirectory", "Enter mod subdirectory (optional):", parent=self.root) or ""
-        keep_structure = messagebox.askyesno("Auto Detect", "Automatically find folder structure? (Yes = auto-detect modinfo.json)", parent=self.root)
-        mods = self._get_mods()
-        mods.append({"url": url, "subdir": subdir, "keep_structure": keep_structure})
-        self._set_mods(mods)
-        self._refresh_mod_list()
-
+        from edit_mod_dialog import EditModDialog
+        dialog = EditModDialog(self.root)
+        self.root.wait_window(dialog)
+        if dialog.result:
+            url, mod_subdir, install_subdir, keep_structure = dialog.result
+            url = self._fix_github_url(url)
+            mods = self._get_mods()
+            mods.append({
+                "url": url,
+                "mod_subdir": mod_subdir,
+                "install_subdir": install_subdir,
+                "keep_structure": keep_structure
+            })
+            self._set_mods(mods)
+            self._refresh_mod_list()
 
     def _edit_mod(self):
         selected = self.listbox.curselection()
@@ -576,13 +627,25 @@ class ModManagerApp:
         mods = self._get_mods()
         mod = mods[index]
 
-        dialog = EditModDialog(self.root, mod.get("url", ""), mod.get("subdir", ""), mod.get("keep_structure", False))
+        from edit_mod_dialog import EditModDialog
+        dialog = EditModDialog(
+            self.root,
+            mod.get("url", ""),
+            mod.get("mod_subdir", mod.get("subdir", "")),
+            mod.get("install_subdir", ""),
+            mod.get("keep_structure", True)
+        )
         self.root.wait_window(dialog)
 
         if dialog.result:
-            url, subdir, keep_structure = dialog.result
+            url, mod_subdir, install_subdir, keep_structure = dialog.result
             url = self._fix_github_url(url)
-            mods[index] = {"url": url, "subdir": subdir, "keep_structure": keep_structure}
+            mods[index] = {
+                "url": url,
+                "mod_subdir": mod_subdir,
+                "install_subdir": install_subdir,
+                "keep_structure": keep_structure
+            }
             self._set_mods(mods)
             self._refresh_mod_list()
 
@@ -671,8 +734,19 @@ class ModManagerApp:
     
     def _download_and_extract_mod(self, mod):
         url = mod.get("url")
-        subdir = mod.get("subdir", "")
+        mod_subdir = mod.get("mod_subdir", mod.get("subdir", ""))  # support old 'subdir'
+        install_subdir = mod.get("install_subdir")
         keep_structure = mod.get("keep_structure", True)
+
+        # If install_subdir is not defined, None, blank, or '.', always use <mod_install_dir>/mods
+        if not install_subdir or install_subdir == ".":
+            base_install_dir = os.path.join(os.path.abspath(self.mod_install_dir), "mods")
+        else:
+            # If install_subdir is absolute, use as is; else, join with mod_install_dir
+            if os.path.isabs(install_subdir):
+                base_install_dir = install_subdir
+            else:
+                base_install_dir = os.path.join(os.path.abspath(self.mod_install_dir), install_subdir)
 
         if not url:
             raise ValueError("No URL provided for mod")
@@ -688,57 +762,49 @@ class ModManagerApp:
                 f.write(response.content)
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                namelist = zip_ref.namelist()
                 logging.info("ZIP file contents:")
-                for name in zip_ref.namelist():
+                for name in namelist:
                     logging.info(f" - {name}")
 
-                if keep_structure:
-                    # Define root inside zip to search for mods (all files under subdir if specified, else whole zip)
-                    root_prefix = subdir.rstrip('/') + '/' if subdir else ""
-
-                    # Find all modinfo.json files recursively under root_prefix
-                    modinfo_paths = [f for f in zip_ref.namelist() if f.startswith(root_prefix) and f.endswith('modinfo.json')]
-
-                    if not modinfo_paths:
-                        raise FileNotFoundError(f"No modinfo.json found under '{subdir}' in the archive")
-
-                    # For each modinfo.json, extract its parent folder as a separate mod
-                    extracted_mods = set()
-                    for modinfo_path in modinfo_paths:
-                        parts = modinfo_path.split('/')
-                        mod_folder = '/'.join(parts[:-1])  # folder containing modinfo.json
-
-                        if mod_folder in extracted_mods:
-                            continue  # avoid extracting the same folder twice
-                        extracted_mods.add(mod_folder)
-
-                        folder_name = mod_folder.split('/')[-1] if mod_folder else ''
-                        dest_folder = os.path.join(self.mod_install_dir, folder_name)
-                        os.makedirs(dest_folder, exist_ok=True)
-
-                        # Extract all members belonging to this mod folder
-                        members = [m for m in zip_ref.namelist() if m == mod_folder or m.startswith(mod_folder + '/')]
-                        for member in members:
-                            relative_path = member[len(mod_folder):].lstrip('/')
-                            target_file_path = os.path.join(dest_folder, relative_path)
-
-                            if member.endswith('/'):
-                                os.makedirs(target_file_path, exist_ok=True)
-                            else:
-                                os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
-                                with zip_ref.open(member) as source, open(target_file_path, "wb") as target:
-                                    shutil.copyfileobj(source, target)
-
-                        logging.info(f"Extracted mod folder '{mod_folder}' as '{folder_name}' in {dest_folder}")
-
+                # Detect single top-level directory (e.g. modname-master/)
+                top_dirs = set()
+                for name in namelist:
+                    parts = name.split('/')
+                    if len(parts) > 1 and parts[0]:
+                        top_dirs.add(parts[0])
+                if len(top_dirs) == 1:
+                    top_dir = list(top_dirs)[0]
+                    logging.info(f"Detected single top-level directory in ZIP: {top_dir}")
+                    root_prefix = top_dir + '/'
                 else:
-                    # Extract all files exactly as they are in the zip
-                    extract_path = os.path.join(self.mod_install_dir)
-                    zip_ref.extractall(extract_path)
-                    logging.info(f"Extracted entire archive with full structure to {extract_path}")
+                    root_prefix = ''
 
-            logging.info(f"Mod {url} installed successfully.")
-            self._refresh_installed_mods()
+                # If mod_subdir is set, move down into that subdir
+                if mod_subdir:
+                    root_prefix = root_prefix + mod_subdir.rstrip('/') + '/'
+
+                members = [m for m in namelist if m.startswith(root_prefix)]
+
+                if not members:
+                    raise FileNotFoundError(f"No files found under '{mod_subdir}' in the archive")
+
+                for member in members:
+                    relative_path = member[len(root_prefix):].lstrip('/')
+                    if not relative_path:
+                        continue  # skip the directory itself
+                    target_file_path = os.path.join(base_install_dir, relative_path)
+
+                    if member.endswith('/'):
+                        os.makedirs(target_file_path, exist_ok=True)
+                    else:
+                        os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
+                        with zip_ref.open(member) as source, open(target_file_path, "wb") as target:
+                            shutil.copyfileobj(source, target)
+
+                logging.info(f"Extracted '{mod_subdir or root_prefix}' to '{base_install_dir}'")
+
+        self._refresh_installed_mods()
 
     def open_profile_manager(self):
         self.profile_manager_dialog = ProfileManagerDialog(
@@ -755,23 +821,48 @@ class ModManagerApp:
     def _run_mod_viewer(self):
         selected = self.installed_listbox.curselection()
         if not selected:
-            messagebox.showwarning("No Selection", "Select an installed mod folder to explore.", parent=self.root)
+            messagebox.showwarning("No Selection", "Select an installed folder to explore.", parent=self.root)
             return
 
         index = selected[0]
         folder_name = self.installed_listbox.get(index)
-        folder_path = os.path.join(self.mod_install_dir, folder_name)
+        folder_path = self._get_installed_folder_path(folder_name)
 
         if not os.path.isdir(folder_path):
-            messagebox.showerror("Error", f"Mod folder does not exist:\n{folder_path}", parent=self.root)
+            messagebox.showerror("Error", f"Folder does not exist:\n{folder_path}", parent=self.root)
             return
 
         try:
             if sys.platform.startswith("win"):
-                cmd = ["cmd.exe", "/c", "run_mod_viewer.bat", folder_path]
+                cmd = ["cmd.exe", "/c", "mod_manager/run_mod_viewer.bat", folder_path]
             else:
-                cmd = ["bash", "run_mod_viewer.sh", folder_path]
-
+                cmd = ["bash", "mod_manager/run_mod_viewer.sh", folder_path]
             subprocess.Popen(cmd, cwd=os.getcwd())
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch mod viewer:\n{e}", parent=self.root)
+
+    def _get_installed_folder_path(self, folder_name):
+        base = self._get_installed_folder_base()
+        return os.path.join(base, folder_name)
+
+    def _get_installed_folder_base(self):
+        selected_display = self.folder_var.get()
+        folder_type = self.folder_map.get(selected_display, "mods")
+        return os.path.join(os.path.abspath(self.mod_install_dir), folder_type)
+
+    def _open_root_folder(self):
+        """Open the game root directory (parent of mods dir) in the system file explorer."""
+        mods_dir = os.path.abspath(self.mod_install_dir)
+        game_root = os.path.dirname(mods_dir)
+        if not os.path.isdir(game_root):
+            messagebox.showerror("Error", f"Game root directory does not exist:\n{game_root}", parent=self.root)
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(game_root)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", game_root])
+            else:
+                subprocess.Popen(["xdg-open", game_root])
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open game root directory:\n{e}", parent=self.root)
