@@ -69,9 +69,33 @@ class Updater:
             return False, None, None, None
         
         try:
-            response = requests.get(self.update_url, timeout=10)
+            # Check if URL points to a specific tag
+            if "/tags/" in self.update_url:
+                # Specific tag URL
+                response = requests.get(self.update_url, timeout=10)
+            else:
+                # Try /latest first, if that fails try /releases
+                response = requests.get(self.update_url, timeout=10)
+                if response.status_code == 404:
+                    # /latest doesn't exist, try getting all releases
+                    base_url = self.update_url.replace("/releases/latest", "/releases")
+                    response = requests.get(base_url, timeout=10)
+                    if response.status_code == 200:
+                        releases = response.json()
+                        if releases and len(releases) > 0:
+                            # Use the first (most recent) release
+                            release_data = releases[0]
+                        else:
+                            return False, None, None, None
+                    else:
+                        response.raise_for_status()
+                else:
+                    release_data = response.json()
+            
+            if response.status_code == 200 and 'release_data' not in locals():
+                release_data = response.json()
+            
             response.raise_for_status()
-            release_data = response.json()
             
             latest_version = release_data.get("tag_name", "").lstrip("v")
             release_notes = release_data.get("body", "")
@@ -118,7 +142,11 @@ class Updater:
             
             return latest_parts > current_parts
         except:
-            # If version comparison fails, assume no update
+            # If version comparison fails (non-semantic version like "update_test"),
+            # check if versions are different - if so, treat as update available
+            if current != latest:
+                logging.info(f"Non-semantic version detected: {latest}. Treating as update available.")
+                return True
             return False
     
     def perform_update(self, download_url, new_version):
