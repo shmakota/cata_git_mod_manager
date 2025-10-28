@@ -13,105 +13,121 @@ def scan_mod_directory(directory):
 
     for root, _, files in os.walk(directory):
         for file in files:
-            if not file.endswith('.json'):
-                continue
-
             filepath = os.path.join(root, file)
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    content = json.load(f)
-                    if isinstance(content, dict):
-                        content = [content]
-                    elif not isinstance(content, list):
-                        continue
 
-                    for entry in content:
-                        if not isinstance(entry, dict):
+            # --- JSON files ---
+            if file.endswith('.json'):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = json.load(f)
+                        if isinstance(content, dict):
+                            content = [content]
+                        elif not isinstance(content, list):
                             continue
 
-                        entry_type = entry.get('type')
-                        entry_id = entry.get('id') or entry.get('om_terrain') or 'null'
+                        for entry in content:
+                            if not isinstance(entry, dict):
+                                continue
 
-                        # Handle 'recipe' specially because 'result' is used as ID
-                        if entry_type == 'recipe':
-                            result = entry.get('result', 'null')
-                            category = entry.get('category', '')
-                            subcategory = entry.get('subcategory', '')
-                            description = f"{category} > {subcategory}" if subcategory else category
-                            mod_data.append({
-                                'type': 'recipe',
-                                'id': result,
-                                'name': None,
-                                'name_plural': '',
-                                'description': description,
-                                'file': filepath,
-                                'full': entry
-                            })
-                            continue
-                        elif entry_type == 'speech':
-                            speaker = entry.get('speaker', 'Unknown speaker')
-                            sound = entry.get('sound', 'No speech line provided.')
-                            mod_data.append({
-                                'type': 'speech',
-                                'id': entry.get('id', 'null'),
-                                'name': speaker,
-                                'name_plural': '',
-                                'description': sound,
-                                'file': filepath,
-                                'full': entry
-                            })
-                            continue
+                            entry_type = entry.get('type')
+                            entry_id = entry.get('id') or entry.get('om_terrain') or 'null'
 
-                        # Generalized fallback for all other types
-                        name = entry.get('name')
-                        desc = entry.get('description') or entry.get('desc')
+                            # Special handling for certain types
+                            if entry_type == 'recipe':
+                                result = entry.get('result', 'null')
+                                category = entry.get('category', '')
+                                subcategory = entry.get('subcategory', '')
+                                description = f"{category} > {subcategory}" if subcategory else category
+                                mod_data.append({
+                                    'type': 'recipe',
+                                    'id': result,
+                                    'name': None,
+                                    'name_plural': '',
+                                    'description': description,
+                                    'file': filepath,
+                                    'full': entry
+                                })
+                                continue
 
-                        if isinstance(name, dict):
-                            name_str = name.get('str') or name.get('str_sp', '')
-                            name_plural = name.get('str_pl', '')
-                        elif isinstance(name, list):
-                            name_str = ' '.join(str(item) for item in name)
-                            name_plural = ''
-                        else:
-                            name_str = str(name) if name else ''
-                            name_plural = ''
+                            elif entry_type == 'speech':
+                                speaker = entry.get('speaker', 'Unknown speaker')
+                                sound = entry.get('sound', 'No speech line provided.')
+                                mod_data.append({
+                                    'type': 'speech',
+                                    'id': entry.get('id', 'null'),
+                                    'name': speaker,
+                                    'name_plural': '',
+                                    'description': sound,
+                                    'file': filepath,
+                                    'full': entry
+                                })
+                                continue
 
-                        if isinstance(desc, dict):
-                            desc_str = desc.get('str') or ''
-                        elif isinstance(desc, list):
-                            desc_str = ' '.join(str(item) for item in desc)
-                        else:
-                            desc_str = str(desc) if desc else ''
+                            # General fallback for all other JSON types
+                            name = entry.get('name')
+                            desc = entry.get('description') or entry.get('desc')
 
-                        # Fallback to 'text' field if no name/desc
-                        if not name_str and not desc_str:
-                            fallback_text = entry.get('text', '')
-                            if isinstance(fallback_text, dict):
-                                fallback_text = fallback_text.get('str', '')
-                            if fallback_text:
-                                name_str = fallback_text
-                                desc_str = fallback_text
+                            if isinstance(name, dict):
+                                name_str = name.get('str') or name.get('str_sp', '')
+                                name_plural = name.get('str_pl', '')
+                            elif isinstance(name, list):
+                                name_str = ' '.join(str(item) for item in name)
+                                name_plural = ''
                             else:
-                                desc_str = "This type has not yet been fully implemented. Bug the GitHub!"
+                                name_str = str(name) if name else ''
+                                name_plural = ''
 
-                        name_str = re.sub(r'</?color[^>]*>', '', name_str)
+                            if isinstance(desc, dict):
+                                desc_str = desc.get('str') or ''
+                            elif isinstance(desc, list):
+                                desc_str = ' '.join(str(item) for item in desc)
+                            else:
+                                desc_str = str(desc) if desc else ''
 
+                            if not name_str and not desc_str:
+                                fallback_text = entry.get('text', '')
+                                if isinstance(fallback_text, dict):
+                                    fallback_text = fallback_text.get('str', '')
+                                if fallback_text:
+                                    name_str = fallback_text
+                                    desc_str = fallback_text
+                                else:
+                                    desc_str = "This type has not yet been fully implemented. Bug the GitHub!"
+
+                            name_str = re.sub(r'</?color[^>]*>', '', name_str)
+
+                            mod_data.append({
+                                'type': entry_type or 'unknown',
+                                'id': entry_id,
+                                'name': name_str or None,
+                                'name_plural': name_plural,
+                                'description': desc_str,
+                                'file': filepath,
+                                'full': entry
+                            })
+                except Exception as e:
+                    print(f"[!] Failed to read {filepath}: {e}")
+                    continue
+
+            # --- LUA files ---
+            elif file.endswith('.lua'):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        snippet = ''.join(lines[:5]).strip()  # Preview first few lines
                         mod_data.append({
-                            'type': entry_type or 'unknown',
-                            'id': entry_id,
-                            'name': name_str or None,
-                            'name_plural': name_plural,
-                            'description': desc_str,
+                            'type': 'lua',
+                            'id': os.path.basename(filepath),
+                            'name': os.path.splitext(file)[0],
+                            'name_plural': '',
+                            'description': snippet or 'Lua script',
                             'file': filepath,
-                            'full': entry
+                            'full': ''.join(lines)
                         })
-
-
-            except Exception as e:
-                print(f"[!] Failed to read {filepath}: {e}")
+                except Exception as e:
+                    print(f"[!] Failed to read Lua file {filepath}: {e}")
 
     return mod_data
-
 
 def get_mod_name(directory):
     modinfo_path = os.path.join(directory, "modinfo.json")
@@ -158,6 +174,10 @@ class ModViewerApp(tk.Tk):
         self.open_folder_button = tk.Button(top_frame, text="Open Folder", command=self.open_folder)
         self.open_folder_button.pack(side='left', padx=5)
         self.open_folder_button.config(state='disabled')  # disabled until a folder is selected
+        self.open_file_button = tk.Button(top_frame, text="Open with Default Program", command=self.open_selected_entry)
+        self.open_file_button.pack(side='left', padx=5)
+        self.open_file_button.config(state='disabled')  # disabled until an entry is selected
+
 
         self.path_label = tk.Label(top_frame, text="No folder selected", anchor='w')
         self.path_label.pack(side='left', padx=10)
@@ -208,6 +228,16 @@ class ModViewerApp(tk.Tk):
         self.detail_text = tk.Text(main_pane, wrap='word')
         main_pane.add(self.detail_text, height=150)
 
+    def open_selected_entry(self):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        entry = self.filtered_data[int(selected[0])]
+        filepath = entry.get('file')
+        if filepath and os.path.isfile(filepath):
+            self.open_path(filepath)
+
+
     def browse_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -219,6 +249,8 @@ class ModViewerApp(tk.Tk):
 
             # Enable the open folder button
             self.open_folder_button.config(state='normal')
+
+            self.open_file_button.config(state='normal')
 
 
     def open_folder(self):
@@ -329,7 +361,11 @@ class ModViewerApp(tk.Tk):
             ]
 
         lines.append(f"File: {entry['file']}\n")
-        lines.append(json.dumps(entry['full'], indent=2))
+        if entry['type'] == 'lua':
+            lines.append(entry['full'])
+        else:
+            lines.append(json.dumps(entry['full'], indent=2))
+        
         self.detail_text.insert(tk.END, "\n".join(lines))
 
 
