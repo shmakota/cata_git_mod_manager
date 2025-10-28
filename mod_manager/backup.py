@@ -237,7 +237,23 @@ class BackupViewerCreator:
             return
         for i in sel:
             fn = self.files[i]
-            shutil.unpack_archive(os.path.join(backup_dir, fn), self.folder)
+            backup_path = os.path.join(backup_dir, fn)
+            
+            # Get world name from metadata
+            meta = self.metadata.get(fn, {})
+            world_name = meta.get('name', '')
+            
+            # If no world name in metadata, try to extract from filename
+            if not world_name:
+                # Filename format: worldname_timestamp.zip
+                world_name = fn.rsplit('_', 1)[0] if '_' in fn else fn.replace('.zip', '')
+            
+            # Create target directory with world name
+            target_dir = os.path.join(self.folder, world_name)
+            
+            # Extract to the world-named folder
+            shutil.unpack_archive(backup_path, target_dir)
+        
         self.populate_current()
         self.populate_backup()
         self.clear_info()
