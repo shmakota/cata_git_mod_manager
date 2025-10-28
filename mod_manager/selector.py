@@ -1,10 +1,26 @@
 # this script is used to select which tool to launch: backup.py, restore.py, mod_manager.py, etc. it is launched from the parent directory .sh or .bat file. it uses tkinter gui
 
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk, Toplevel, Label
 import subprocess
 import os
 import sys
+import logging
+
+# Setup logging
+logging.basicConfig(
+    filename='mod_debug.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Import updater
+try:
+    from updater import Updater
+    UPDATER_AVAILABLE = True
+except ImportError:
+    UPDATER_AVAILABLE = False
+    logging.warning("Updater module not available")
 
 TOOLS = [
     ("Game Launcher", "launcher.py"),
@@ -24,18 +40,213 @@ def launch_tool(script_name):
     except Exception as e:
         messagebox.showerror("Error", f"Failed to launch {script_name}:\n{e}")
 
+class MultitoolApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Cataclysm Multitool")
+        self.root.geometry("400x320")
+        
+        # Initialize updater
+        if UPDATER_AVAILABLE:
+            self.updater = Updater()
+            self.version = self.updater.get_current_version()
+        else:
+            self.updater = None
+            self.version = "Unknown"
+        
+        # Version label at top
+        version_label = tk.Label(root, text=f"Version {self.version}", font=("Arial", 9), fg="gray")
+        version_label.pack(pady=(5, 0))
+        
+        # Main label
+        label = tk.Label(root, text="Select a tool to launch:", font=("Arial", 12))
+        label.pack(pady=10)
+        
+        # Tool buttons
+        for tool_name, script in TOOLS:
+            btn = tk.Button(root, text=tool_name, width=25, command=lambda s=script: launch_tool(s))
+            btn.pack(pady=5)
+        
+        # Update button at bottom
+        if UPDATER_AVAILABLE:
+            update_frame = tk.Frame(root)
+            update_frame.pack(pady=(10, 5))
+            
+            self.update_button = tk.Button(
+                update_frame,
+                text="Check for Updates",
+                command=self._check_for_updates,
+                width=25
+            )
+            self.update_button.pack()
+            
+            # Auto-check for updates after 1 second
+            self.root.after(1000, self._auto_check_updates)
+    
+    def _auto_check_updates(self):
+        """Automatically check for updates on startup (silent)"""
+        if not UPDATER_AVAILABLE:
+            return
+        
+        try:
+            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
+            
+            if has_update and latest_version:
+                # Update button appearance
+                self.update_button.config(
+                    text=f"Update Available (v{latest_version})",
+                    fg="green",
+                    font=("TkDefaultFont", 9, "bold")
+                )
+        except Exception as e:
+            logging.error(f"Error checking for updates on startup: {e}")
+    
+    def _check_for_updates(self):
+        """Manual update check triggered by button"""
+        if not UPDATER_AVAILABLE:
+            messagebox.showerror("Error", "Updater module not available")
+            return
+        
+        try:
+            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
+            
+            if has_update and latest_version:
+                self._show_update_dialog(latest_version, download_url, release_notes)
+            else:
+                messagebox.showinfo(
+                    "No Updates",
+                    f"You are running the latest version (v{self.version}).",
+                    parent=self.root
+                )
+        except Exception as e:
+            messagebox.showerror(
+                "Update Check Failed",
+                f"Failed to check for updates:\n{e}",
+                parent=self.root
+            )
+    
+    def _show_update_dialog(self, latest_version, download_url, release_notes):
+        """Show dialog with update details and option to install"""
+        dialog = Toplevel(self.root)
+        dialog.title("Update Available")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Title
+        title_label = Label(
+            dialog,
+            text=f"Version {latest_version} is available!",
+            font=("TkDefaultFont", 12, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # Current version
+        current_label = Label(dialog, text=f"Current version: {self.version}")
+        current_label.pack()
+        
+        # Release notes
+        notes_frame = tk.Frame(dialog)
+        notes_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        tk.Label(notes_frame, text="Release Notes:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        
+        notes_text = tk.Text(notes_frame, wrap=tk.WORD, height=10)
+        notes_text.pack(fill=tk.BOTH, expand=True)
+        notes_scrollbar = ttk.Scrollbar(notes_frame, command=notes_text.yview)
+        notes_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        notes_text.config(yscrollcommand=notes_scrollbar.set)
+        
+        if release_notes:
+            notes_text.insert(1.0, release_notes)
+        else:
+            notes_text.insert(1.0, "No release notes available.")
+        notes_text.config(state=tk.DISABLED)
+        
+        # Warning label
+        warning_label = Label(
+            dialog,
+            text="⚠️  The application will restart after updating.\nYour settings and mods will be preserved.",
+            fg="orange",
+            justify=tk.LEFT
+        )
+        warning_label.pack(pady=5)
+        
+        # Buttons
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        def do_update():
+            dialog.destroy()
+            self._perform_update(download_url, latest_version)
+        
+        tk.Button(button_frame, text="Update Now", command=do_update, width=15).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Later", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+    
+    def _perform_update(self, download_url, new_version):
+        """Perform the update with progress indication"""
+        # Show progress dialog
+        progress_dialog = Toplevel(self.root)
+        progress_dialog.title("Updating...")
+        progress_dialog.geometry("400x150")
+        progress_dialog.transient(self.root)
+        progress_dialog.grab_set()
+        
+        status_label = Label(progress_dialog, text="Downloading update...", wraplength=350)
+        status_label.pack(expand=True, pady=20)
+        
+        progress_dialog.update()
+        
+        def update_worker():
+            try:
+                success = self.updater.perform_update(download_url, new_version)
+                progress_dialog.destroy()
+                
+                if success:
+                    # Show success message and restart
+                    messagebox.showinfo(
+                        "Update Complete",
+                        "Update installed successfully!\n\nThe application will now restart.",
+                        parent=self.root
+                    )
+                    
+                    # Restart the application
+                    self._restart_application()
+                else:
+                    messagebox.showerror(
+                        "Update Failed",
+                        "Failed to install update. Check mod_debug.log and update_history.log for details.",
+                        parent=self.root
+                    )
+            except Exception as e:
+                progress_dialog.destroy()
+                messagebox.showerror(
+                    "Update Error",
+                    f"An error occurred during update:\n{e}",
+                    parent=self.root
+                )
+        
+        # Run update in background
+        self.root.after(100, update_worker)
+    
+    def _restart_application(self):
+        """Restart the application"""
+        try:
+            python = sys.executable
+            logging.info(f"Restarting application with: {python} {sys.argv}")
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            logging.error(f"Failed to restart application: {e}")
+            messagebox.showwarning(
+                "Restart Manually",
+                f"Update completed successfully!\n\nPlease restart the application manually to use the new version.\n\nTechnical details: {e}",
+                parent=self.root
+            )
+            self.root.quit()
+
 def main():
     root = tk.Tk()
-    root.title("Cataclysm Multitool")
-    root.geometry("400x250")
-
-    label = tk.Label(root, text="Select a tool to launch:", font=("Arial", 12))
-    label.pack(pady=10)
-
-    for tool_name, script in TOOLS:
-        btn = tk.Button(root, text=tool_name, width=25, command=lambda s=script: launch_tool(s))
-        btn.pack(pady=5)
-
+    app = MultitoolApp(root)
     root.mainloop()
 
 if __name__ == "__main__":

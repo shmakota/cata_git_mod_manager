@@ -84,18 +84,39 @@ class CataInstallerApp:
         self.load_installed_version()
 
     def save_installed_version(self, version):
-        cfg_dir = os.path.join(os.getcwd(), "cfg")
-        os.makedirs(cfg_dir, exist_ok=True)
-        version_file = os.path.join(cfg_dir, "version.json")
+        """Save the installed game version"""
+        version_file = "version.json"
+        data = {}
+        
+        # Load existing version.json
+        if os.path.exists(version_file):
+            try:
+                with open(version_file, "r") as f:
+                    data = json.load(f)
+            except:
+                pass
+        
+        # Update only the game_version field
+        data["game_version"] = version
+        
+        # Ensure program_version exists
+        if "program_version" not in data:
+            data["program_version"] = "1.0.5"
+        
         with open(version_file, "w") as f:
-            json.dump({"version": version}, f, indent=4)
+            json.dump(data, f, indent=2)
 
     def load_installed_version(self):
-        version_file = os.path.join("cfg", "version.json")
+        """Load the installed game version"""
+        version_file = "version.json"
         if os.path.exists(version_file):
-            with open(version_file, "r") as f:
-                data = json.load(f)
-                version = data.get("version", "(unknown)")
+            try:
+                with open(version_file, "r") as f:
+                    data = json.load(f)
+                    # Load game_version, not program_version
+                    version = data.get("game_version", data.get("version", "(unknown)"))
+            except:
+                version = "(unknown)"
         else:
             version = "(not installed)"
         self.installed_version_var.set(f"Installed version: {version}")
