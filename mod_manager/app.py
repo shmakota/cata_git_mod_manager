@@ -1218,12 +1218,13 @@ class ModManagerApp:
         """Restart the application"""
         try:
             python = sys.executable
+            logging.info(f"Restarting application with: {python} {sys.argv}")
             os.execl(python, python, *sys.argv)
         except Exception as e:
             logging.error(f"Failed to restart application: {e}")
-            messagebox.showerror(
-                "Restart Failed",
-                f"Please restart the application manually:\n{e}",
+            messagebox.showwarning(
+                "Restart Manually",
+                f"Update completed successfully!\n\nPlease restart the application manually to use the new version.\n\nTechnical details: {e}",
                 parent=self.root
             )
             self.root.quit()

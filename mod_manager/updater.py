@@ -10,8 +10,9 @@ from pathlib import Path
 
 VERSION_FILE = "version.json"  # Tool version (ships with releases, gets overwritten)
 CONFIG_FILE = "cfg/mod_manager_config.json"  # User config (preserved)
+UPDATE_LOG_FILE = "update_history.log"  # Permanent update log (never deleted)
 BASE_PRESERVED_DIRS = ["cfg", "mods"]  # Always preserve these directories
-PRESERVED_FILES = ["mod_debug.log"]  # Files to preserve during update
+PRESERVED_FILES = ["mod_debug.log", "update_history.log"]  # Files to preserve during update
 
 
 class Updater:
@@ -25,7 +26,8 @@ class Updater:
             try:
                 with open(VERSION_FILE, 'r') as f:
                     data = json.load(f)
-                    return data.get("version", "1.0.5")
+                    # Try program_version first, fall back to version for backwards compatibility
+                    return data.get("program_version", data.get("version", "1.0.5"))
             except Exception as e:
                 logging.error(f"Error loading version: {e}")
                 return "1.0.5"
@@ -63,11 +65,15 @@ class Updater:
                 with open(VERSION_FILE, 'r') as f:
                     data = json.load(f)
             
-            data["version"] = version
+            # Save as program_version, keep game_version if it exists
+            data["program_version"] = version
+            # Keep existing game_version if present
+            if "game_version" not in data:
+                data["game_version"] = ""
             
             with open(VERSION_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
-            logging.info(f"Updated version to {version}")
+            logging.info(f"Updated program version to {version}")
         except Exception as e:
             logging.error(f"Error saving version: {e}")
     
@@ -228,6 +234,17 @@ class Updater:
         
         return preserved
     
+    def _log_update(self, message):
+        """Log to both regular log and permanent update history log"""
+        logging.info(message)
+        try:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(UPDATE_LOG_FILE, 'a') as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            logging.error(f"Failed to write to update log: {e}")
+    
     def perform_update(self, download_url, new_version):
         """Download and apply update while preserving user data
         
@@ -240,14 +257,19 @@ class Updater:
         """
         root_dir = os.getcwd()
         
+        self._log_update("="*60)
+        self._log_update(f"UPDATE STARTED: {self.current_version} → {new_version}")
+        self._log_update(f"Download URL: {download_url}")
+        
         # Get list of directories to preserve (including dynamic paths)
         PRESERVED_DIRS = self._get_preserved_dirs()
-        logging.info(f"Preserving directories: {PRESERVED_DIRS}")
+        self._log_update(f"Preserving directories: {PRESERVED_DIRS}")
+        self._log_update(f"Preserving files: {PRESERVED_FILES}")
         
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 # Step 1: Download the new version
-                logging.info(f"Downloading update from {download_url}")
+                self._log_update(f"STEP 1: Downloading update from {download_url}")
                 zip_path = os.path.join(temp_dir, "update.zip")
                 
                 response = requests.get(download_url, timeout=30)
@@ -256,6 +278,7 @@ class Updater:
                 with open(zip_path, 'wb') as f:
                     f.write(response.content)
                 
+                self._log_update(f"STEP 2: Extracting update to temporary location")
                 # Step 2: Extract to temporary location
                 extract_dir = os.path.join(temp_dir, "extracted")
                 os.makedirs(extract_dir, exist_ok=True)
@@ -272,36 +295,36 @@ class Updater:
                     source_dir = extract_dir
                 
                 # Step 3: Backup user data to temp location
+                self._log_update(f"STEP 3: Backing up user data to temp location")
                 backup_dir = os.path.join(temp_dir, "user_backup")
                 os.makedirs(backup_dir, exist_ok=True)
                 
-                logging.info(f"Backing up directories: {PRESERVED_DIRS}")
-                
                 for item in PRESERVED_DIRS:
                     src = os.path.join(root_dir, item)
-                    logging.info(f"Checking if {item} exists at: {src}")
                     if os.path.exists(src):
                         dst = os.path.join(backup_dir, item)
                         try:
                             if os.path.isdir(src):
                                 # Use ignore_dangling_symlinks to skip broken links
                                 shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True)
-                                logging.info(f"✓ Backed up directory: {item}")
+                                self._log_update(f"  ✓ Backed up directory: {item}")
                             else:
                                 shutil.copy2(src, dst)
-                                logging.info(f"✓ Backed up file: {item}")
+                                self._log_update(f"  ✓ Backed up file: {item}")
                         except Exception as e:
-                            logging.error(f"Failed to backup {item} from {src} to {dst}: {e}")
+                            self._log_update(f"  ✗ Failed to backup {item}: {e}")
                             raise
                     else:
-                        logging.info(f"Skipping {item} (doesn't exist)")
+                        self._log_update(f"  - Skipping {item} (doesn't exist)")
                 
                 for item in PRESERVED_FILES:
                     src = os.path.join(root_dir, item)
                     if os.path.exists(src):
                         dst = os.path.join(backup_dir, item)
                         shutil.copy2(src, dst)
+                        self._log_update(f"  ✓ Backed up file: {item}")
                 
+                self._log_update(f"STEP 4: Removing old files")
                 # Step 4: Remove ALL old files (we have backups of preserved data)
                 for item in os.listdir(root_dir):
                     item_path = os.path.join(root_dir, item)
@@ -313,6 +336,7 @@ class Updater:
                     except Exception as e:
                         logging.warning(f"Could not remove {item}: {e}")
                 
+                self._log_update(f"STEP 5: Installing new files (skipping preserved directories)")
                 # Step 5: Copy new files (SKIP preserved directories completely)
                 for item in os.listdir(source_dir):
                     src = os.path.join(source_dir, item)
@@ -329,6 +353,7 @@ class Updater:
                     else:
                         shutil.copy2(src, dst)
                 
+                self._log_update(f"STEP 6: Restoring user data from backup")
                 # Step 6: Restore user data (ALWAYS restore from backup, NEVER from new release)
                 for item in PRESERVED_DIRS:
                     src = os.path.join(backup_dir, item)
@@ -346,23 +371,57 @@ class Updater:
                         # Restore the backed up directory/file
                         if os.path.isdir(src):
                             shutil.copytree(src, dst)
+                            self._log_update(f"  ✓ Restored directory: {item}")
                         else:
                             shutil.copy2(src, dst)
+                            self._log_update(f"  ✓ Restored file: {item}")
                 
                 for item in PRESERVED_FILES:
                     src = os.path.join(backup_dir, item)
                     if os.path.exists(src):
                         dst = os.path.join(root_dir, item)
                         shutil.copy2(src, dst)
+                        self._log_update(f"  ✓ Restored file: {item}")
                 
                 # Step 7: Update version file
-                self._save_version(new_version)
+                # Note: new_version comes from the GitHub tag name
+                # The new release's version.json was already installed in Step 5
+                # We only update it if it doesn't match
+                self._log_update(f"STEP 7: Verifying version file")
                 
-                logging.info(f"Successfully updated to version {new_version}")
+                # Read what version the new release has
+                if os.path.exists(VERSION_FILE):
+                    try:
+                        with open(VERSION_FILE, 'r') as f:
+                            new_version_data = json.load(f)
+                            # Check for program_version first, fall back to version
+                            installed_version = new_version_data.get("program_version", new_version_data.get("version", new_version))
+                            game_version = new_version_data.get("game_version", "")
+                            
+                            self._log_update(f"  New release program_version: {installed_version}")
+                            if game_version:
+                                self._log_update(f"  New release game_version: {game_version}")
+                            
+                            # If the tag is different from the version in the file, log it
+                            if installed_version != new_version:
+                                self._log_update(f"  Note: GitHub tag '{new_version}' differs from program_version '{installed_version}'")
+                    except Exception as e:
+                        self._log_update(f"  Warning: Could not read new version.json: {e}")
+                        # Fall back to saving the tag name
+                        self._save_version(new_version)
+                
+                self._log_update(f"✅ UPDATE COMPLETED SUCCESSFULLY: {self.current_version} → {new_version}")
+                self._log_update("="*60 + "\n")
                 return True
                 
         except Exception as e:
+            import traceback
+            error_msg = f"❌ UPDATE FAILED: {e}"
+            self._log_update(error_msg)
+            self._log_update(f"Traceback:\n{traceback.format_exc()}")
+            self._log_update("="*60 + "\n")
             logging.error(f"Error performing update: {e}")
+            logging.error(f"Traceback:\n{traceback.format_exc()}")
             return False
     
     def get_current_version(self):
