@@ -79,27 +79,6 @@ class MultitoolApp:
                 width=25
             )
             self.update_button.pack()
-            
-            # Auto-check for updates after 1 second
-            self.root.after(1000, self._auto_check_updates)
-    
-    def _auto_check_updates(self):
-        """Automatically check for updates on startup (silent)"""
-        if not UPDATER_AVAILABLE:
-            return
-        
-        try:
-            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
-            
-            if has_update and latest_version:
-                # Update button appearance
-                self.update_button.config(
-                    text=f"Update Available (v{latest_version})",
-                    fg="green",
-                    font=("TkDefaultFont", 9, "bold")
-                )
-        except Exception as e:
-            logging.error(f"Error checking for updates on startup: {e}")
     
     def _check_for_updates(self):
         """Manual update check triggered by button"""
@@ -107,18 +86,34 @@ class MultitoolApp:
             messagebox.showerror("Error", "Updater module not available")
             return
         
+        # Update button to show checking
+        original_text = self.update_button.cget("text")
+        self.update_button.config(text="Checking...", state="disabled")
+        self.root.update()
+        
         try:
             has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
             
             if has_update and latest_version:
+                # Update button appearance to show update available
+                self.update_button.config(
+                    text=f"Update Available (v{latest_version})",
+                    fg="green",
+                    font=("TkDefaultFont", 9, "bold"),
+                    state="normal"
+                )
                 self._show_update_dialog(latest_version, download_url, release_notes)
             else:
+                # Reset button to normal
+                self.update_button.config(text=original_text, state="normal", fg="black", font=("TkDefaultFont", 9))
                 messagebox.showinfo(
                     "No Updates",
                     f"You are running the latest version (v{self.version}).",
                     parent=self.root
                 )
         except Exception as e:
+            # Reset button to normal on error
+            self.update_button.config(text=original_text, state="normal", fg="black", font=("TkDefaultFont", 9))
             messagebox.showerror(
                 "Update Check Failed",
                 f"Failed to check for updates:\n{e}",
@@ -129,7 +124,7 @@ class MultitoolApp:
         """Show dialog with update details and option to install"""
         dialog = Toplevel(self.root)
         dialog.title("Update Available")
-        dialog.geometry("600x400")
+        dialog.geometry("600x450")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -145,17 +140,22 @@ class MultitoolApp:
         current_label = Label(dialog, text=f"Current version: {self.version}")
         current_label.pack()
         
-        # Release notes
+        # Release notes with scrollbar
         notes_frame = tk.Frame(dialog)
         notes_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         tk.Label(notes_frame, text="Release Notes:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         
-        notes_text = tk.Text(notes_frame, wrap=tk.WORD, height=10)
-        notes_text.pack(fill=tk.BOTH, expand=True)
-        notes_scrollbar = ttk.Scrollbar(notes_frame, command=notes_text.yview)
+        # Text widget with scrollbar
+        notes_container = tk.Frame(notes_frame)
+        notes_container.pack(fill=tk.BOTH, expand=True)
+        
+        notes_scrollbar = ttk.Scrollbar(notes_container)
         notes_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        notes_text.config(yscrollcommand=notes_scrollbar.set)
+        
+        notes_text = tk.Text(notes_container, wrap=tk.WORD, height=10, yscrollcommand=notes_scrollbar.set)
+        notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        notes_scrollbar.config(command=notes_text.yview)
         
         if release_notes:
             notes_text.insert(1.0, release_notes)
@@ -163,18 +163,18 @@ class MultitoolApp:
             notes_text.insert(1.0, "No release notes available.")
         notes_text.config(state=tk.DISABLED)
         
-        # Warning label
+        # Warning label (no expansion)
         warning_label = Label(
             dialog,
             text="⚠️  The application will restart after updating.\nYour settings and mods will be preserved.",
             fg="orange",
-            justify=tk.LEFT
+            justify=tk.CENTER
         )
-        warning_label.pack(pady=5)
+        warning_label.pack(pady=(10, 5), padx=10)
         
-        # Buttons
+        # Buttons (fixed size, no expansion)
         button_frame = tk.Frame(dialog)
-        button_frame.pack(pady=10)
+        button_frame.pack(pady=(5, 15))
         
         def do_update():
             dialog.destroy()
