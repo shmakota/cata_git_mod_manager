@@ -8,7 +8,8 @@ import sys
 import logging
 from pathlib import Path
 
-VERSION_FILE = "cfg/version.json"
+VERSION_FILE = "version.json"  # Tool version (ships with releases, gets overwritten)
+CONFIG_FILE = "cfg/mod_manager_config.json"  # User config (preserved)
 PRESERVED_DIRS = ["cfg", "mods"]  # Directories to preserve during update
 PRESERVED_FILES = ["mod_debug.log"]  # Files to preserve during update
 
@@ -19,7 +20,7 @@ class Updater:
         self.update_url = self._load_update_url()
         
     def _load_version(self):
-        """Load current version from version.json"""
+        """Load current version from version.json (tool version file)"""
         if os.path.exists(VERSION_FILE):
             try:
                 with open(VERSION_FILE, 'r') as f:
@@ -31,19 +32,31 @@ class Updater:
         return "1.0.5"
     
     def _load_update_url(self):
-        """Load update URL from version.json"""
+        """Load update URL from user config (preserved across updates)"""
+        # First try user config (preserved)
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+                    update_url = data.get("update_url", "")
+                    if update_url:
+                        return update_url
+            except Exception as e:
+                logging.error(f"Error loading update URL from config: {e}")
+        
+        # Fallback to version.json (for backwards compatibility)
         if os.path.exists(VERSION_FILE):
             try:
                 with open(VERSION_FILE, 'r') as f:
                     data = json.load(f)
                     return data.get("update_url", "")
             except Exception as e:
-                logging.error(f"Error loading update URL: {e}")
-                return ""
+                logging.error(f"Error loading update URL from version file: {e}")
+        
         return ""
     
     def _save_version(self, version):
-        """Save new version to version.json"""
+        """Save new version to version.json (this file ships with releases)"""
         try:
             data = {}
             if os.path.exists(VERSION_FILE):
@@ -57,6 +70,25 @@ class Updater:
             logging.info(f"Updated version to {version}")
         except Exception as e:
             logging.error(f"Error saving version: {e}")
+    
+    def save_update_url(self, url):
+        """Save update URL to user config (preserved across updates)"""
+        try:
+            data = {}
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE, 'r') as f:
+                    data = json.load(f)
+            
+            data["update_url"] = url
+            
+            # Ensure cfg directory exists
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(data, f, indent=2)
+            logging.info(f"Saved update URL to config")
+        except Exception as e:
+            logging.error(f"Error saving update URL: {e}")
     
     def check_for_updates(self):
         """Check GitHub for latest release

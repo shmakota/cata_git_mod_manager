@@ -25,7 +25,7 @@ logging.basicConfig(
 # Constants
 PROFILES_FILE = "cfg/mod_profiles.json"
 CONFIG_FILE = "cfg/mod_manager_config.json"
-VERSION_FILE = "cfg/version.json"
+VERSION_FILE = "version.json"  # Tool version (ships with releases)
 # It is not necessary to store files in this folder at all, just a default location for organization
 DEFAULT_MODS_DIR = "mods"
 
