@@ -210,12 +210,16 @@ class Updater:
                     try:
                         rel_path = os.path.relpath(abs_path, root_dir)
                         # If relative path doesn't start with .., it's inside root_dir
-                        if not rel_path.startswith('..') and os.path.exists(abs_path):
+                        if not rel_path.startswith('..'):
                             # Get the top-level directory name
                             top_level = rel_path.split(os.sep)[0]
-                            if top_level and top_level not in preserved:
+                            # Check if this directory actually exists in the root dir
+                            local_path = os.path.join(root_dir, top_level)
+                            if top_level and top_level not in preserved and os.path.exists(local_path):
                                 preserved.append(top_level)
-                                logging.info(f"Will preserve directory from config: {top_level}")
+                                logging.info(f"Will preserve directory from config: {top_level} (exists at {local_path})")
+                            elif not os.path.exists(local_path):
+                                logging.info(f"Skipping {top_level} from config path {path} - doesn't exist locally")
                     except ValueError:
                         # Different drives on Windows, skip
                         pass
@@ -271,14 +275,26 @@ class Updater:
                 backup_dir = os.path.join(temp_dir, "user_backup")
                 os.makedirs(backup_dir, exist_ok=True)
                 
+                logging.info(f"Backing up directories: {PRESERVED_DIRS}")
+                
                 for item in PRESERVED_DIRS:
                     src = os.path.join(root_dir, item)
+                    logging.info(f"Checking if {item} exists at: {src}")
                     if os.path.exists(src):
                         dst = os.path.join(backup_dir, item)
-                        if os.path.isdir(src):
-                            shutil.copytree(src, dst)
-                        else:
-                            shutil.copy2(src, dst)
+                        try:
+                            if os.path.isdir(src):
+                                # Use ignore_dangling_symlinks to skip broken links
+                                shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True)
+                                logging.info(f"✓ Backed up directory: {item}")
+                            else:
+                                shutil.copy2(src, dst)
+                                logging.info(f"✓ Backed up file: {item}")
+                        except Exception as e:
+                            logging.error(f"Failed to backup {item} from {src} to {dst}: {e}")
+                            raise
+                    else:
+                        logging.info(f"Skipping {item} (doesn't exist)")
                 
                 for item in PRESERVED_FILES:
                     src = os.path.join(root_dir, item)
