@@ -120,7 +120,23 @@ class Updater:
             
             response.raise_for_status()
             
-            latest_version = release_data.get("tag_name", "").lstrip("v")
+            # Extract version from tag_name
+            tag_name = release_data.get("tag_name", "")
+            latest_version = tag_name.lstrip("v")
+            
+            # If tag is "latest" or non-semantic, try to extract version from the release name
+            if latest_version == "latest" or not latest_version:
+                release_name = release_data.get("name", "")
+                # Try to extract version from name (e.g., "1.0.5 TEST" -> "1.0.5")
+                import re
+                version_match = re.search(r'(\d+\.\d+\.\d+)', release_name)
+                if version_match:
+                    latest_version = version_match.group(1)
+                    logging.info(f"Extracted version {latest_version} from release name: {release_name}")
+                else:
+                    logging.error(f"Could not extract version from tag '{tag_name}' or name '{release_name}'")
+                    return False, None, None, None
+            
             release_notes = release_data.get("body", "")
             
             # Find the zipball URL from assets or use the zipball_url
@@ -355,7 +371,7 @@ class Updater:
                         
                         # Restore the backed up directory/file
                         if os.path.isdir(src):
-                            shutil.copytree(src, dst)
+                            shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True)
                             self._log_update(f"  ✓ Restored directory: {item}")
                         else:
                             shutil.copy2(src, dst)
