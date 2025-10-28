@@ -13,6 +13,7 @@ import re
 from tkinter import filedialog, messagebox, simpledialog, ttk, Toplevel, Label
 from profile_dialog import ProfileManagerDialog
 from edit_mod_dialog import EditModDialog
+from updater import Updater
 
 # Setup logging
 logging.basicConfig(
@@ -24,6 +25,7 @@ logging.basicConfig(
 # Constants
 PROFILES_FILE = "cfg/mod_profiles.json"
 CONFIG_FILE = "cfg/mod_manager_config.json"
+VERSION_FILE = "cfg/version.json"
 # It is not necessary to store files in this folder at all, just a default location for organization
 DEFAULT_MODS_DIR = "mods"
 
@@ -34,11 +36,13 @@ INSTALL_TYPE_DIRS = {
 }
 
 class ModManagerApp:
-    # unstable
-    version = "1.0.5"
-
     def __init__(self, root):
         self.root = root
+        
+        # Initialize updater and load version
+        self.updater = Updater()
+        self.version = self.updater.get_current_version()
+        
         self.root.title("Cataclysm Content Manager v" + self.version)
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
@@ -65,6 +69,9 @@ class ModManagerApp:
         self._refresh_profile_combo()
         self._refresh_mod_list()
         self._refresh_installed_mods()
+        
+        # Check for updates after UI is built
+        self.root.after(1000, self._check_for_updates)
     
     def clear_log(self, log_file='mod_debug.log'):
         """Clears the contents of the specified log file."""
@@ -388,6 +395,10 @@ class ModManagerApp:
         self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_change)
 
         tk.Button(profile_frame, text="Manage Profiles", command=self.open_profile_manager).grid(row=0, column=2, padx=10)
+        
+        # Check for Updates button
+        self.update_button = tk.Button(profile_frame, text="Check for Updates", command=self._manual_update_check)
+        self.update_button.grid(row=0, column=3, padx=(0, 0))
 
         explanation = (
             "Enter the GitHub ZIP URL for the mod archive.\n"
@@ -1060,3 +1071,159 @@ class ModManagerApp:
                 subprocess.Popen(["xdg-open", game_root])
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open game root directory:\n{e}", parent=self.root)
+    
+    # --- Update Methods ---
+    def _check_for_updates(self):
+        """Automatically check for updates on startup (silent)"""
+        try:
+            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
+            
+            if has_update and latest_version:
+                # Show notification that update is available
+                self.update_button.config(text=f"Update Available (v{latest_version})", fg="green", font=("TkDefaultFont", 9, "bold"))
+                self._show_update_notification(latest_version, download_url, release_notes)
+        except Exception as e:
+            logging.error(f"Error checking for updates on startup: {e}")
+    
+    def _manual_update_check(self):
+        """Manual update check triggered by button"""
+        try:
+            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
+            
+            if has_update and latest_version:
+                self._show_update_dialog(latest_version, download_url, release_notes)
+            else:
+                messagebox.showinfo(
+                    "No Updates",
+                    f"You are running the latest version (v{self.version}).",
+                    parent=self.root
+                )
+        except Exception as e:
+            messagebox.showerror(
+                "Update Check Failed",
+                f"Failed to check for updates:\n{e}",
+                parent=self.root
+            )
+    
+    def _show_update_notification(self, latest_version, download_url, release_notes):
+        """Show a subtle notification that an update is available"""
+        # Just change the button appearance - user can click to see details
+        pass
+    
+    def _show_update_dialog(self, latest_version, download_url, release_notes):
+        """Show dialog with update details and option to install"""
+        dialog = Toplevel(self.root)
+        dialog.title("Update Available")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Title
+        title_label = Label(
+            dialog,
+            text=f"Version {latest_version} is available!",
+            font=("TkDefaultFont", 12, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # Current version
+        current_label = Label(dialog, text=f"Current version: {self.version}")
+        current_label.pack()
+        
+        # Release notes
+        notes_frame = tk.Frame(dialog)
+        notes_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        tk.Label(notes_frame, text="Release Notes:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        
+        notes_text = tk.Text(notes_frame, wrap=tk.WORD, height=10)
+        notes_text.pack(fill=tk.BOTH, expand=True)
+        notes_scrollbar = ttk.Scrollbar(notes_frame, command=notes_text.yview)
+        notes_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        notes_text.config(yscrollcommand=notes_scrollbar.set)
+        
+        if release_notes:
+            notes_text.insert(1.0, release_notes)
+        else:
+            notes_text.insert(1.0, "No release notes available.")
+        notes_text.config(state=tk.DISABLED)
+        
+        # Warning label
+        warning_label = Label(
+            dialog,
+            text="⚠️  The application will restart after updating.\nYour settings and mods will be preserved.",
+            fg="orange",
+            justify=tk.LEFT
+        )
+        warning_label.pack(pady=5)
+        
+        # Buttons
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        def do_update():
+            dialog.destroy()
+            self._perform_update(download_url, latest_version)
+        
+        tk.Button(button_frame, text="Update Now", command=do_update, width=15).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Later", command=dialog.destroy, width=15).pack(side=tk.LEFT, padx=5)
+    
+    def _perform_update(self, download_url, new_version):
+        """Perform the update with progress indication"""
+        # Show progress dialog
+        progress_dialog = Toplevel(self.root)
+        progress_dialog.title("Updating...")
+        progress_dialog.geometry("400x150")
+        progress_dialog.transient(self.root)
+        progress_dialog.grab_set()
+        
+        status_label = Label(progress_dialog, text="Downloading update...", wraplength=350)
+        status_label.pack(expand=True, pady=20)
+        
+        progress_dialog.update()
+        
+        def update_worker():
+            try:
+                success = self.updater.perform_update(download_url, new_version)
+                progress_dialog.destroy()
+                
+                if success:
+                    # Show success message and restart
+                    result = messagebox.showinfo(
+                        "Update Complete",
+                        "Update installed successfully!\n\nThe application will now restart.",
+                        parent=self.root
+                    )
+                    
+                    # Restart the application
+                    self._restart_application()
+                else:
+                    messagebox.showerror(
+                        "Update Failed",
+                        "Failed to install update. Check mod_debug.log for details.",
+                        parent=self.root
+                    )
+            except Exception as e:
+                progress_dialog.destroy()
+                messagebox.showerror(
+                    "Update Error",
+                    f"An error occurred during update:\n{e}",
+                    parent=self.root
+                )
+        
+        # Run update in background
+        self.root.after(100, update_worker)
+    
+    def _restart_application(self):
+        """Restart the application"""
+        try:
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+        except Exception as e:
+            logging.error(f"Failed to restart application: {e}")
+            messagebox.showerror(
+                "Restart Failed",
+                f"Please restart the application manually:\n{e}",
+                parent=self.root
+            )
+            self.root.quit()

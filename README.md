@@ -16,7 +16,9 @@ A utility program primarily created for **Cataclysm: Bright Nights (CBN)**
   - Multi-profile support – Easily switch between different mod setups.
   - Supports modpacks and individual mods – Automatically scans nested folders for `modinfo.json`, ensuring compatibility with complex mod structures. The user can also define a custom subdirectory for the mod or custom install folder name.
   - Quick explorer access - Allows quick access to the Mod Explorer, or your system's file explorer.
-### - Mod Explorer – Directly view and quickly sort through every JSON entry (and soon LUA scripts) a mod adds to the game.
+  - **Auto-Update** – Automatically checks for and installs tool updates from GitHub while preserving your settings and mods.
+  
+### - Mod Explorer – Directly view and quickly sort through every JSON entry and Lua scripts a mod adds to the game.
   ![image](https://github.com/user-attachments/assets/a85facb4-c834-415b-964c-ece3f928d6e7)
   
 ### - Backup Manager - Name, create and load backups at any time.
