@@ -1,6 +1,5 @@
 {
   "mod_install_dir": "cataclysm",
   "backup_dir": "",
-  "game_install_dir": "/home/soda/Downloads/cata_git_mod_manager/cataclysmbn-unstable",
-  "update_url": "https://api.github.com/repos/shmakota/cata_git_mod_manager/releases/tags/update_test"
+  "game_install_dir": ""
 }

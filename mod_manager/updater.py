@@ -34,19 +34,7 @@ class Updater:
         return "1.0.5"
     
     def _load_update_url(self):
-        """Load update URL from user config (preserved across updates)"""
-        # First try user config (preserved)
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, 'r') as f:
-                    data = json.load(f)
-                    update_url = data.get("update_url", "")
-                    if update_url:
-                        return update_url
-            except Exception as e:
-                logging.error(f"Error loading update URL from config: {e}")
-        
-        # Fallback to version.json (for backwards compatibility)
+        """Load update URL from version.json"""
         if os.path.exists(VERSION_FILE):
             try:
                 with open(VERSION_FILE, 'r') as f:
@@ -78,21 +66,18 @@ class Updater:
             logging.error(f"Error saving version: {e}")
     
     def save_update_url(self, url):
-        """Save update URL to user config (preserved across updates)"""
+        """Save update URL to version.json"""
         try:
             data = {}
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r') as f:
+            if os.path.exists(VERSION_FILE):
+                with open(VERSION_FILE, 'r') as f:
                     data = json.load(f)
             
             data["update_url"] = url
             
-            # Ensure cfg directory exists
-            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-            
-            with open(CONFIG_FILE, 'w') as f:
+            with open(VERSION_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
-            logging.info(f"Saved update URL to config")
+            logging.info(f"Saved update URL to version.json")
         except Exception as e:
             logging.error(f"Error saving update URL: {e}")
     
