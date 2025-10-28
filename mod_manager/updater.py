@@ -10,7 +10,7 @@ from pathlib import Path
 
 VERSION_FILE = "version.json"  # Tool version (ships with releases, gets overwritten)
 CONFIG_FILE = "cfg/mod_manager_config.json"  # User config (preserved)
-PRESERVED_DIRS = ["cfg", "mods"]  # Directories to preserve during update
+BASE_PRESERVED_DIRS = ["cfg", "mods"]  # Always preserve these directories
 PRESERVED_FILES = ["mod_debug.log"]  # Files to preserve during update
 
 
@@ -181,6 +181,49 @@ class Updater:
                 return True
             return False
     
+    def _get_preserved_dirs(self):
+        """Get list of directories to preserve, including dynamic paths from config"""
+        preserved = list(BASE_PRESERVED_DIRS)  # Start with base dirs
+        
+        # Load config to find additional directories to preserve
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    config = json.load(f)
+                
+                # Check paths in config
+                paths_to_check = [
+                    config.get("game_install_dir", ""),
+                    config.get("backup_dir", ""),
+                    config.get("mod_install_dir", "")
+                ]
+                
+                root_dir = os.getcwd()
+                for path in paths_to_check:
+                    if not path:
+                        continue
+                    
+                    # Convert to absolute path
+                    abs_path = os.path.abspath(path)
+                    
+                    # Check if this path is inside the root directory
+                    try:
+                        rel_path = os.path.relpath(abs_path, root_dir)
+                        # If relative path doesn't start with .., it's inside root_dir
+                        if not rel_path.startswith('..') and os.path.exists(abs_path):
+                            # Get the top-level directory name
+                            top_level = rel_path.split(os.sep)[0]
+                            if top_level and top_level not in preserved:
+                                preserved.append(top_level)
+                                logging.info(f"Will preserve directory from config: {top_level}")
+                    except ValueError:
+                        # Different drives on Windows, skip
+                        pass
+            except Exception as e:
+                logging.error(f"Error reading config for preserved dirs: {e}")
+        
+        return preserved
+    
     def perform_update(self, download_url, new_version):
         """Download and apply update while preserving user data
         
@@ -192,6 +235,10 @@ class Updater:
             bool: True if update successful, False otherwise
         """
         root_dir = os.getcwd()
+        
+        # Get list of directories to preserve (including dynamic paths)
+        PRESERVED_DIRS = self._get_preserved_dirs()
+        logging.info(f"Preserving directories: {PRESERVED_DIRS}")
         
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -239,11 +286,8 @@ class Updater:
                         dst = os.path.join(backup_dir, item)
                         shutil.copy2(src, dst)
                 
-                # Step 4: Remove old files (except preserved directories)
+                # Step 4: Remove ALL old files (we have backups of preserved data)
                 for item in os.listdir(root_dir):
-                    if item in PRESERVED_DIRS:
-                        continue
-                    
                     item_path = os.path.join(root_dir, item)
                     try:
                         if os.path.isdir(item_path):
@@ -253,12 +297,12 @@ class Updater:
                     except Exception as e:
                         logging.warning(f"Could not remove {item}: {e}")
                 
-                # Step 5: Copy new files
+                # Step 5: Copy new files (SKIP preserved directories completely)
                 for item in os.listdir(source_dir):
                     src = os.path.join(source_dir, item)
                     dst = os.path.join(root_dir, item)
                     
-                    # Skip if this is a preserved directory
+                    # Skip if this is a preserved directory - don't copy from new release at all
                     if item in PRESERVED_DIRS:
                         continue
                     
@@ -269,21 +313,25 @@ class Updater:
                     else:
                         shutil.copy2(src, dst)
                 
-                # Step 6: Restore user data
+                # Step 6: Restore user data (ALWAYS restore from backup, NEVER from new release)
                 for item in PRESERVED_DIRS:
                     src = os.path.join(backup_dir, item)
+                    dst = os.path.join(root_dir, item)
+                    
                     if os.path.exists(src):
-                        dst = os.path.join(root_dir, item)
-                        # For cfg, merge rather than replace
-                        if item == "cfg" and os.path.exists(dst):
-                            # Copy individual files to preserve user settings
-                            for file in os.listdir(src):
-                                shutil.copy2(os.path.join(src, file), os.path.join(dst, file))
-                        elif not os.path.exists(dst):
-                            if os.path.isdir(src):
-                                shutil.copytree(src, dst)
+                        # Always use the backed up version
+                        # Remove any directory that might exist from the new release
+                        if os.path.exists(dst):
+                            if os.path.isdir(dst):
+                                shutil.rmtree(dst)
                             else:
-                                shutil.copy2(src, dst)
+                                os.remove(dst)
+                        
+                        # Restore the backed up directory/file
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
                 
                 for item in PRESERVED_FILES:
                     src = os.path.join(backup_dir, item)
