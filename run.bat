@@ -14,5 +14,5 @@ REM Install requests package
 pip install requests
 
 REM Run the Python script
-python mod_manager\main.py
+python mod_manager\selector.py
 

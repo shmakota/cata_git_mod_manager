@@ -8,7 +8,8 @@ CONFIG_FILE = "cfg/mod_manager_config.json"
 VERSION_FILE = "version.json"
 
 # defaults
-DEFAULT_MODS_DIR = "mods"
+# Use 'userdata' to match the --userdir parameter passed to the game launcher
+DEFAULT_MODS_DIR = "userdata"
 
 # install type directories
 INSTALL_TYPE_DIRS = {

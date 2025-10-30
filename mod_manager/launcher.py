@@ -304,50 +304,79 @@ class CataInstallerApp:
             if name.endswith(".zip"):
                 with ZipFile(data) as zipf:
                     members = zipf.namelist()
-                    # Strip both the archive wrapper (like "cataclysmbn-unstable-master")
-                    # and any nested "cataclysmbn-unstable" folder
+                    
+                    # Detect the common root directory in the ZIP
+                    root_dirs = set()
                     for member in members:
                         parts = member.split('/')
-                        # Remove empty parts and filter out the first directory (usually the archive name)
-                        filtered_parts = [p for p in parts if p]  # Remove empty strings
+                        if len(parts) > 0 and parts[0]:
+                            root_dirs.add(parts[0])
+                    
+                    # If all files share a single root directory, strip it
+                    strip_prefix = ""
+                    if len(root_dirs) == 1:
+                        strip_prefix = list(root_dirs)[0] + "/"
+                        print(f"Detected root directory to strip: {strip_prefix}")
+                    
+                    # Extract all members, stripping the root prefix if found
+                    for member in members:
+                        # Strip the common root prefix
+                        target_path = member
+                        if strip_prefix and member.startswith(strip_prefix):
+                            target_path = member[len(strip_prefix):]
                         
-                        if len(filtered_parts) <= 1:
+                        # Skip empty paths (root directory entries)
+                        if not target_path or target_path == '/':
                             continue
                         
-                        # Skip the first part (archive name like "cataclysmbn-unstable-master")
-                        # and also skip 'cataclysmbn-unstable' if it's nested
-                        target_parts = filtered_parts[1:]
-                        if len(target_parts) > 0 and target_parts[0] == 'cataclysmbn-unstable':
-                            target_parts = target_parts[1:]
-                        
-                        target_path = '/'.join(target_parts)
-                        if not target_path:
-                            continue
                         dest = os.path.join(INSTALL_DIR, target_path)
+                        
+                        # Create directory entries
                         if member.endswith('/'):
                             os.makedirs(dest, exist_ok=True)
                         else:
-                            os.makedirs(os.path.dirname(dest), exist_ok=True)
+                            # Create parent directories if needed
+                            dest_dir = os.path.dirname(dest)
+                            if dest_dir:
+                                os.makedirs(dest_dir, exist_ok=True)
+                            # Extract the file
                             with zipf.open(member) as source, open(dest, "wb") as target:
                                 target.write(source.read())
+                    
+                    print(f"Successfully extracted {len(members)} members from ZIP")
             elif name.endswith(".tar.gz"):
                 with tarfile.open(fileobj=data, mode="r:gz") as tarf:
-                    for member in tarf.getmembers():
+                    all_members = tarf.getmembers()
+                    
+                    # Detect the common root directory in the TAR
+                    root_dirs = set()
+                    for member in all_members:
                         parts = member.name.split('/')
-                        # Remove empty parts
-                        filtered_parts = [p for p in parts if p]
+                        if len(parts) > 0 and parts[0]:
+                            root_dirs.add(parts[0])
+                    
+                    # If all files share a single root directory, strip it
+                    strip_prefix = ""
+                    if len(root_dirs) == 1:
+                        strip_prefix = list(root_dirs)[0] + "/"
+                        print(f"Detected root directory to strip: {strip_prefix}")
+                    
+                    # Extract all members, stripping the root prefix if found
+                    for member in all_members:
+                        # Strip the common root prefix
+                        target_path = member.name
+                        if strip_prefix and member.name.startswith(strip_prefix):
+                            target_path = member.name[len(strip_prefix):]
                         
-                        if len(filtered_parts) <= 1:
+                        # Skip empty paths (root directory entries)
+                        if not target_path or target_path == '/':
                             continue
                         
-                        # Skip the first part (archive name) and also skip 'cataclysmbn-unstable' if nested
-                        target_parts = filtered_parts[1:]
-                        if len(target_parts) > 0 and target_parts[0] == 'cataclysmbn-unstable':
-                            target_parts = target_parts[1:]
-                        
-                        if target_parts:
-                            member.name = '/'.join(target_parts)
-                            tarf.extract(member, INSTALL_DIR)
+                        # Update member name and extract
+                        member.name = target_path
+                        tarf.extract(member, INSTALL_DIR)
+                    
+                    print(f"Successfully extracted {len(all_members)} members from TAR.GZ")
             else:
                 raise ValueError("Unsupported archive format.")
 
@@ -379,9 +408,32 @@ class CataInstallerApp:
                 return
 
         try:
+            # Create local directories for user data
+            # basepath: where the game data files are located (the installation directory)
+            # userdir: where saves, configs, and user-installed mods are stored
+            basepath = INSTALL_DIR
+            userdir = os.path.join(os.getcwd(), "userdata")
+            
+            # Create userdir if it doesn't exist
+            os.makedirs(userdir, exist_ok=True)
+            
+            # Make executable on Linux/Mac
             if system != "Windows":
                 os.chmod(exe_path, 0o755)
-            subprocess.Popen([exe_path], cwd=os.path.dirname(exe_path))
+            
+            # Launch the game with command-line arguments
+            cmd = [
+                exe_path,
+                "--basepath", basepath,
+                "--userdir", userdir
+            ]
+            
+            print(f"Launching game with:")
+            print(f"  Executable: {exe_path}")
+            print(f"  Base path: {basepath}")
+            print(f"  User dir: {userdir}")
+            
+            subprocess.Popen(cmd, cwd=os.path.dirname(exe_path))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to launch game:\n{e}")
 

@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 class EditModDialog(tk.Toplevel):
 
-    def __init__(self, parent, url="", mod_subdir="", install_subdir="mods/cbn", keep_structure=False):
+    def __init__(self, parent, url="", mod_subdir="", install_subdir="mods", keep_structure=False):
         super().__init__(parent)
         self.title("Edit Mod")
         self.geometry("500x220")

@@ -1,0 +1,38 @@
+# User data directory (contains saves, configs, and user-installed mods)
+userdata/
+
+# Game installation directory
+cataclysmbn-unstable/
+
+# Log files
+*.log
+mod_debug.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+
