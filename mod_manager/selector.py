@@ -43,8 +43,6 @@ def launch_tool(script_name):
 class MultitoolApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Cataclysm Multitool")
-        self.root.geometry("400x320")
         
         # Initialize updater
         if UPDATER_AVAILABLE:
@@ -54,9 +52,9 @@ class MultitoolApp:
             self.updater = None
             self.version = "Unknown"
         
-        # Version label at top
-        version_label = tk.Label(root, text=f"Version {self.version}", font=("Arial", 9), fg="gray")
-        version_label.pack(pady=(5, 0))
+        # Set title with version
+        self.root.title(f"Cataclysm Multitool v{self.version}")
+        self.root.geometry("400x300")
         
         # Main label
         label = tk.Label(root, text="Select a tool to launch:", font=("Arial", 12))
@@ -76,9 +74,17 @@ class MultitoolApp:
                 update_frame,
                 text="Check for Updates",
                 command=self._check_for_updates,
-                width=25
+                width=25,
+                anchor="center"
             )
             self.update_button.pack()
+            
+            # Store original button configuration for consistency
+            self.original_button_config = {
+                'width': 25,
+                'fg': self.update_button.cget('fg'),
+                'font': self.update_button.cget('font')
+            }
     
     def _check_for_updates(self):
         """Manual update check triggered by button"""
@@ -88,24 +94,35 @@ class MultitoolApp:
         
         # Update button to show checking
         original_text = self.update_button.cget("text")
-        self.update_button.config(text="Checking...", state="disabled")
+        self.update_button.config(
+            text="Checking...",
+            state="disabled",
+            width=self.original_button_config['width']
+        )
         self.root.update()
         
         try:
             has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
             
             if has_update and latest_version:
-                # Update button appearance to show update available
+                # Update button appearance to show update available (keep consistent size)
                 self.update_button.config(
                     text=f"Update Available (v{latest_version})",
                     fg="green",
-                    font=("TkDefaultFont", 9, "bold"),
-                    state="normal"
+                    font=self.original_button_config['font'],
+                    state="normal",
+                    width=self.original_button_config['width']
                 )
                 self._show_update_dialog(latest_version, download_url, release_notes)
             else:
                 # Reset button to normal
-                self.update_button.config(text=original_text, state="normal", fg="black", font=("TkDefaultFont", 9))
+                self.update_button.config(
+                    text=original_text,
+                    state="normal",
+                    fg=self.original_button_config['fg'],
+                    font=self.original_button_config['font'],
+                    width=self.original_button_config['width']
+                )
                 messagebox.showinfo(
                     "No Updates",
                     f"You are running the latest version (v{self.version}).",
@@ -113,7 +130,13 @@ class MultitoolApp:
                 )
         except Exception as e:
             # Reset button to normal on error
-            self.update_button.config(text=original_text, state="normal", fg="black", font=("TkDefaultFont", 9))
+            self.update_button.config(
+                text=original_text,
+                state="normal",
+                fg=self.original_button_config['fg'],
+                font=self.original_button_config['font'],
+                width=self.original_button_config['width']
+            )
             messagebox.showerror(
                 "Update Check Failed",
                 f"Failed to check for updates:\n{e}",

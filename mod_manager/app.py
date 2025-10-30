@@ -38,10 +38,7 @@ class ModManagerApp:
     def __init__(self, root):
         self.root = root
         
-        # Load version from version.json
-        self.version = self._load_version()
-        
-        self.root.title("Cataclysm Content Manager v" + self.version)
+        self.root.title("Cataclysm Content Manager")
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
     
@@ -67,20 +64,6 @@ class ModManagerApp:
         self._refresh_profile_combo()
         self._refresh_mod_list()
         self._refresh_installed_mods()
-    
-    def _load_version(self):
-        """Load program version from version.json"""
-        version_file = "version.json"
-        if os.path.exists(version_file):
-            try:
-                with open(version_file, 'r') as f:
-                    data = json.load(f)
-                    # Try program_version first, fall back to version for backwards compatibility
-                    return data.get("program_version", data.get("version", "1.0.5"))
-            except Exception as e:
-                logging.error(f"Error loading version: {e}")
-                return "1.0.5"
-        return "1.0.5"
     
     def clear_log(self, log_file='mod_debug.log'):
         """Clears the contents of the specified log file."""

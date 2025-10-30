@@ -2,7 +2,7 @@ import os
 import json
 import tkinter as tk
 import re
-from tkinter import filedialog, ttk
+from tkinter import filedialog, ttk, messagebox
 import subprocess
 import platform
 import sys
@@ -178,6 +178,9 @@ class ModViewerApp(tk.Tk):
         self.open_file_button.pack(side='left', padx=5)
         self.open_file_button.config(state='disabled')  # disabled until an entry is selected
 
+        self.save_results_button = tk.Button(top_frame, text="Save Results", command=self.save_results)
+        self.save_results_button.pack(side='left', padx=5)
+        self.save_results_button.config(state='disabled')  # disabled until entries are loaded
 
         self.path_label = tk.Label(top_frame, text="No folder selected", anchor='w')
         self.path_label.pack(side='left', padx=10)
@@ -247,10 +250,10 @@ class ModViewerApp(tk.Tk):
             self.mod_data = scan_mod_directory(folder)
             self.update_filter()
 
-            # Enable the open folder button
+            # Enable the buttons
             self.open_folder_button.config(state='normal')
-
             self.open_file_button.config(state='normal')
+            self.save_results_button.config(state='normal')
 
 
     def open_folder(self):
@@ -279,6 +282,58 @@ class ModViewerApp(tk.Tk):
                 subprocess.Popen(["xdg-open", path])
         except Exception as e:
             print(f"[!] Failed to open path {path}: {e}")
+
+    def save_results(self):
+        """Save all currently filtered entries to a file"""
+        if not self.filtered_data:
+            messagebox.showinfo("No Data", "No entries to save. Load a mod folder first.")
+            return
+        
+        # Ask user for save location
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ],
+            title="Save Results"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                # Write header
+                f.write(f"Cataclysm Mod Explorer - Results Export\n")
+                f.write(f"Total Entries: {len(self.filtered_data)}\n")
+                f.write(f"Source Folder: {self.path_label.cget('text')}\n")
+                f.write("=" * 80 + "\n\n")
+                
+                # Write each entry
+                for idx, entry in enumerate(self.filtered_data, 1):
+                    f.write(f"Entry #{idx}\n")
+                    f.write("-" * 80 + "\n")
+                    f.write(f"Name: {entry.get('name', 'null')}\n")
+                    f.write(f"ID: {entry.get('id', 'null')}\n")
+                    f.write(f"Type: {entry.get('type', 'unknown')}\n")
+                    f.write(f"Description: {entry.get('description', 'null')}\n")
+                    f.write(f"File: {entry.get('file', 'unknown')}\n")
+                    f.write("\nFull Entry:\n")
+                    
+                    # Write full JSON or Lua content
+                    if entry.get('type') == 'lua':
+                        f.write(entry.get('full', ''))
+                    else:
+                        f.write(json.dumps(entry.get('full', {}), indent=2))
+                    
+                    f.write("\n\n" + "=" * 80 + "\n\n")
+            
+            messagebox.showinfo("Success", f"Saved {len(self.filtered_data)} entries to:\n{file_path}")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save results:\n{e}")
 
 
 
@@ -382,5 +437,7 @@ if __name__ == "__main__":
             app.mod_data = scan_mod_directory(folder)
             app.update_filter()
             app.open_folder_button.config(state='normal')
+            app.open_file_button.config(state='normal')
+            app.save_results_button.config(state='normal')
 
     app.mainloop()
