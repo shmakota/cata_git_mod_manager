@@ -15,23 +15,36 @@ CONFIG_FILE = os.path.join("cfg", "mod_manager_config.json")
 DEFAULT_INSTALL_DIR = os.path.join(os.getcwd(), "cataclysmbn-unstable")
 
 def load_and_update_config():
+    """Load configuration and ensure game_install_dir is set
+    
+    Returns:
+        dict: Configuration dictionary
+    """
     config = {}
     changed = False
+    
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(CONFIG_FILE, "r", encoding='utf-8') as f:
                 config = json.load(f)
-        except Exception:
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Failed to load config, using defaults: {e}")
             config = {}
+    
     # Ensure game_install_dir is present (launcher uses this for game installation)
     if "game_install_dir" not in config or not config["game_install_dir"]:
         # Use DEFAULT_INSTALL_DIR as the game installation directory
         config["game_install_dir"] = DEFAULT_INSTALL_DIR
         changed = True
+    
     if changed:
-        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
+        try:
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+        except (IOError, OSError) as e:
+            print(f"Warning: Failed to save config: {e}")
+    
     return config
 
 config = load_and_update_config()
@@ -84,41 +97,54 @@ class CataInstallerApp:
         self.load_installed_version()
 
     def save_installed_version(self, version):
-        """Save the installed game version"""
+        """Save the installed game version
+        
+        Args:
+            version: Game version string to save
+        """
         version_file = "version.json"
         data = {}
         
         # Load existing version.json
         if os.path.exists(version_file):
             try:
-                with open(version_file, "r") as f:
+                with open(version_file, "r", encoding='utf-8') as f:
                     data = json.load(f)
-            except:
-                pass
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to load version file: {e}")
         
         # Update only the game_version field
         data["game_version"] = version
         
-        # Ensure program_version exists
+        # Ensure program_version and update_url exist
         if "program_version" not in data:
             data["program_version"] = "1.0.5"
+        if "update_url" not in data:
+            data["update_url"] = "https://api.github.com/repos/shmakota/cata_git_mod_manager/releases/latest"
         
-        with open(version_file, "w") as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(version_file, "w", encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except (IOError, OSError) as e:
+            messagebox.showerror("Error", f"Failed to save version information: {e}")
 
     def load_installed_version(self):
         """Load the installed game version"""
         version_file = "version.json"
+        version = "(not installed)"
+        
         if os.path.exists(version_file):
             try:
-                with open(version_file, "r") as f:
+                with open(version_file, "r", encoding='utf-8') as f:
                     data = json.load(f)
                     # Load game_version, not program_version
-                    version = data.get("game_version", data.get("version", "(unknown)"))
-            except:
+                    version = data.get("game_version", "")
+                    if not version:
+                        version = "(unknown)"
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to load version: {e}")
                 version = "(unknown)"
-        else:
-            version = "(not installed)"
+        
         self.installed_version_var.set(f"Installed version: {version}")
 
     def fetch_releases(self):

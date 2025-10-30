@@ -11,23 +11,45 @@ CONFIG_FILE = os.path.join("cfg", "mod_manager_config.json")
 DEFAULT_BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'backup')
 
 def get_backup_dir():
+    """Get or create backup directory from config
+    
+    Returns:
+        str: Absolute path to backup directory
+    """
     config = {}
     changed = False
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(CONFIG_FILE, "r", encoding='utf-8') as f:
                 config = json.load(f)
-        except Exception:
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Failed to load config: {e}")
             config = {}
+    
+    # ensure backup directory is configured.
     if "backup_dir" not in config or not config["backup_dir"]:
         config["backup_dir"] = DEFAULT_BACKUP_DIR
         changed = True
+    
+    # save config if we added the default.
     if changed:
-        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
+        try:
+            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+        except (IOError, OSError) as e:
+            print(f"Warning: Failed to save config: {e}")
+    
+    # create the backup directory if it doesn't exist.
     backup_dir = os.path.abspath(config["backup_dir"])
-    os.makedirs(backup_dir, exist_ok=True)
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except OSError as e:
+        print(f"Error: Failed to create backup directory: {e}")
+        # fallback to default if configured path fails.
+        backup_dir = os.path.abspath(DEFAULT_BACKUP_DIR)
+        os.makedirs(backup_dir, exist_ok=True)
+    
     return backup_dir
 
 class BackupViewerCreator:
@@ -114,28 +136,67 @@ class BackupViewerCreator:
         self.populate_backup()
 
     def create_backup(self):
+        """Create backup archives for selected folders"""
         backup_dir = get_backup_dir()
-        if not hasattr(self, 'folder'):
+        if not hasattr(self, 'folder') or not self.folder:
+            messagebox.showwarning("No Folder", "Please select a folder first.")
             return
+        
         sels = self.left_list.curselection()
         dirs = [self.left_list.get(i) for i in sels]
         if not dirs:
             messagebox.showinfo("No Selection", "Please select folders to backup.")
             return
+        
+        success_count = 0
+        failed = []
+        
         for d in dirs:
             src = os.path.join(self.folder, d)
-            if os.path.isdir(src):
+            if not os.path.isdir(src):
+                failed.append((d, "Not a directory"))
+                continue
+            
+            try:
                 desc = simpledialog.askstring("Backup Description", f"Enter description for '{d}':")
+                if desc is None:  # user cancelled.
+                    continue
+                
+                # generate timestamp-based filename.
                 ts = time.strftime('%Y%m%d%H%M%S')
                 base = f"{d}_{ts}"
                 zip_path = os.path.join(backup_dir, base)
+                
+                # create backup archive.
                 shutil.make_archive(zip_path, 'zip', src)
+                
+                # save metadata alongside the zip.
                 meta = {'name': d, 'timestamp': ts, 'description': desc or ''}
-                with open(zip_path + '.json', 'w') as sf:
+                with open(zip_path + '.json', 'w', encoding='utf-8') as sf:
                     json.dump(meta, sf, indent=2)
+                
+                success_count += 1
+            except Exception as e:
+                failed.append((d, str(e)))
+        
+        # Show results
+        if success_count > 0:
+            msg = f"Successfully backed up {success_count} folder(s)."
+            if failed:
+                msg += f"\n\nFailed: {len(failed)}"
+                for name, error in failed:
+                    msg += f"\n- {name}: {error}"
+            messagebox.showinfo("Backup Complete", msg)
+        elif failed:
+            msg = "All backups failed:\n"
+            for name, error in failed:
+                msg += f"\n- {name}: {error}"
+            messagebox.showerror("Backup Failed", msg)
+        
         self.populate_backup()
 
     def populate_current(self):
+        """populate left list with folders from selected directory."""
         self.left_list.delete(0, tk.END)
         folders = []
         for e in os.listdir(self.folder):
@@ -143,21 +204,29 @@ class BackupViewerCreator:
             if os.path.isdir(p):
                 ctime = datetime.fromtimestamp(os.path.getctime(p))
                 folders.append((e, ctime))
+        
+        # sort based on user selection.
         opt = self.lsort_var.get()
         if opt.startswith('Name'):
             folders.sort(key=lambda f: f[0].lower(), reverse=(opt=='Name Z-A'))
         else:
             folders.sort(key=lambda f: f[1], reverse=(opt=='Date ↑'))
+        
         self.left_folders = folders
         for name, _ in folders:
             self.left_list.insert(tk.END, name)
 
     def populate_backup(self):
+        """populate right list with available backup archives."""
         backup_dir = get_backup_dir()
         self.right_list.delete(0, tk.END)
         entries = []
+        
+        # scan backup directory for zip files and their metadata.
         for fn in os.listdir(backup_dir):
             if not fn.endswith('.zip'): continue
+            
+            # try to load metadata from companion json file.
             sc = os.path.join(backup_dir, fn.replace('.zip','.json'))
             meta = {}
             if os.path.isfile(sc):
@@ -165,6 +234,8 @@ class BackupViewerCreator:
                     meta = json.load(open(sc))
                 except:
                     meta = {}
+            
+            # extract info from metadata or fallback to filename.
             world = meta.get('name', fn)
             desc = meta.get('description', '')
             dt = None
@@ -175,6 +246,8 @@ class BackupViewerCreator:
                 except:
                     dt = None
             entries.append((fn, world, desc, dt))
+        
+        # sort based on user selection.
         opt = self.rsort_var.get()
         if opt.startswith('Date'):
             entries.sort(key=lambda e: e[3] or datetime.min, reverse=(opt=='Date ↓'))
@@ -182,8 +255,12 @@ class BackupViewerCreator:
             entries.sort(key=lambda e: e[1].lower(), reverse=(opt=='Name Z-A'))
         else:
             entries.sort(key=lambda e: e[2].lower(), reverse=(opt=='Description Z-A'))
+        
+        # store for later use.
         self.files = [e[0] for e in entries]
         self.metadata = {e[0]:{'name':e[1],'description':e[2],'timestamp':e[3].strftime('%Y%m%d%H%M%S') if e[3] else ''} for e in entries}
+        
+        # display in list.
         for _, world, desc, dt in entries:
             time_str = dt.strftime('%Y-%m-%d %H:%M:%S') if dt else ''
             display = f"{desc} | {world} | {time_str}" if desc else f"{world} | {time_str}"
@@ -231,45 +308,124 @@ class BackupViewerCreator:
         
 
     def load_backup(self):
-        backup_dir = get_backup_dir()
-        sel = self.right_list.curselection()
-        if not sel or not hasattr(self, 'folder'):
+        """Load selected backup archives"""
+        if not hasattr(self, 'folder') or not self.folder:
+            messagebox.showwarning("No Folder", "Please select a folder first.")
             return
+        
+        sel = self.right_list.curselection()
+        if not sel:
+            messagebox.showinfo("No Selection", "Please select backups to restore.")
+            return
+        
+        backup_dir = get_backup_dir()
+        success_count = 0
+        failed = []
+        
         for i in sel:
             fn = self.files[i]
             backup_path = os.path.join(backup_dir, fn)
             
-            # Get world name from metadata
-            meta = self.metadata.get(fn, {})
-            world_name = meta.get('name', '')
-            
-            # If no world name in metadata, try to extract from filename
-            if not world_name:
-                # Filename format: worldname_timestamp.zip
-                world_name = fn.rsplit('_', 1)[0] if '_' in fn else fn.replace('.zip', '')
-            
-            # Create target directory with world name
-            target_dir = os.path.join(self.folder, world_name)
-            
-            # Extract to the world-named folder
-            shutil.unpack_archive(backup_path, target_dir)
+            try:
+                # get world name from metadata.
+                meta = self.metadata.get(fn, {})
+                world_name = meta.get('name', '')
+                
+                # fallback: extract world name from filename (format: worldname_timestamp.zip).
+                if not world_name:
+                    world_name = fn.rsplit('_', 1)[0] if '_' in fn else fn.replace('.zip', '')
+                
+                # sanitize to prevent path traversal attacks.
+                world_name = os.path.basename(world_name)
+                if not world_name or world_name in ('.', '..'):
+                    failed.append((fn, "Invalid world name"))
+                    continue
+                
+                # backups extract into a folder named after the world.
+                target_dir = os.path.join(self.folder, world_name)
+                
+                # warn if target already exists.
+                if os.path.exists(target_dir):
+                    response = messagebox.askyesno(
+                        "Overwrite?",
+                        f"'{world_name}' already exists. Overwrite?",
+                        parent=self.root
+                    )
+                    if not response:
+                        continue
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                
+                # extract the backup.
+                shutil.unpack_archive(backup_path, target_dir)
+                success_count += 1
+                
+            except Exception as e:
+                failed.append((fn, str(e)))
+        
+        # Show results
+        if success_count > 0:
+            msg = f"Successfully restored {success_count} backup(s)."
+            if failed:
+                msg += f"\n\nFailed: {len(failed)}"
+                for name, error in failed:
+                    msg += f"\n- {name}: {error}"
+            messagebox.showinfo("Restore Complete", msg)
+        elif failed:
+            msg = "All restores failed:\n"
+            for name, error in failed:
+                msg += f"\n- {name}: {error}"
+            messagebox.showerror("Restore Failed", msg)
         
         self.populate_current()
         self.populate_backup()
         self.clear_info()
 
     def delete_backup(self):
-        backup_dir = get_backup_dir()
+        """Delete selected backup archives"""
         sel = self.right_list.curselection()
         if not sel:
+            messagebox.showinfo("No Selection", "Please select backups to delete.")
             return
+        
+        # Confirm deletion
+        count = len(sel)
+        if not messagebox.askyesno(
+            "Delete Backups",
+            f"Delete {count} backup(s)? This cannot be undone.",
+            parent=self.root
+        ):
+            return
+        
+        backup_dir = get_backup_dir()
+        success_count = 0
+        failed = []
+        
         for i in sel:
             fn = self.files[i]
-            if messagebox.askyesno("Delete Backup", f"Delete '{fn}'? This cannot be undone."):
-                os.remove(os.path.join(backup_dir, fn))
-                sc = os.path.join(backup_dir, fn.replace('.zip', '.json'))
-                if os.path.isfile(sc):
-                    os.remove(sc)
+            try:
+                # Delete backup file
+                backup_path = os.path.join(backup_dir, fn)
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                
+                # Delete metadata file
+                meta_path = os.path.join(backup_dir, fn.replace('.zip', '.json'))
+                if os.path.exists(meta_path):
+                    os.remove(meta_path)
+                
+                success_count += 1
+            except Exception as e:
+                failed.append((fn, str(e)))
+        
+        # Show results
+        if success_count > 0 and not failed:
+            messagebox.showinfo("Delete Complete", f"Deleted {success_count} backup(s).")
+        elif failed:
+            msg = f"Deleted {success_count} backup(s).\n\nFailed: {len(failed)}"
+            for name, error in failed:
+                msg += f"\n- {name}: {error}"
+            messagebox.showwarning("Delete Partial", msg)
+        
         self.populate_backup()
         self.clear_info()
 

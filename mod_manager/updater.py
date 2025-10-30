@@ -92,42 +92,45 @@ class Updater:
             return False, None, None, None
         
         try:
+            logging.info(f"Checking for updates from: {self.update_url}")
+            
             # Check if URL points to a specific tag
             if "/tags/" in self.update_url:
                 # Specific tag URL
-                response = requests.get(self.update_url, timeout=10)
+                response = requests.get(self.update_url, timeout=15)
+                response.raise_for_status()
+                release_data = response.json()
             else:
                 # Try /latest first, if that fails try /releases
-                response = requests.get(self.update_url, timeout=10)
+                response = requests.get(self.update_url, timeout=15)
+                
                 if response.status_code == 404:
                     # /latest doesn't exist, try getting all releases
                     base_url = self.update_url.replace("/releases/latest", "/releases")
-                    response = requests.get(base_url, timeout=10)
-                    if response.status_code == 200:
-                        releases = response.json()
-                        if releases and len(releases) > 0:
-                            # Use the first (most recent) release
-                            release_data = releases[0]
-                        else:
-                            return False, None, None, None
-                    else:
-                        response.raise_for_status()
-                else:
+                    logging.info(f"Latest endpoint not found, trying: {base_url}")
+                    response = requests.get(base_url, timeout=15)
+                    response.raise_for_status()
+                    releases = response.json()
+                    
+                    if not releases or len(releases) == 0:
+                        logging.warning("No releases found")
+                        return False, None, None, None
+                    
+                    # Use the first (most recent) release
+                    release_data = releases[0]
+                elif response.status_code == 200:
                     release_data = response.json()
+                else:
+                    response.raise_for_status()
+                    return False, None, None, None
             
-            if response.status_code == 200 and 'release_data' not in locals():
-                release_data = response.json()
-            
-            response.raise_for_status()
-            
-            # Extract version from tag_name
+            # extract version from tag_name (e.g., "v1.0.6" -> "1.0.6").
             tag_name = release_data.get("tag_name", "")
             latest_version = tag_name.lstrip("v")
             
-            # If tag is "latest" or non-semantic, try to extract version from the release name
+            # some repos use "latest" as tag; extract version from release name instead.
             if latest_version == "latest" or not latest_version:
                 release_name = release_data.get("name", "")
-                # Try to extract version from name (e.g., "1.0.5 TEST" -> "1.0.5")
                 import re
                 version_match = re.search(r'(\d+\.\d+\.\d+)', release_name)
                 if version_match:
@@ -139,27 +142,43 @@ class Updater:
             
             release_notes = release_data.get("body", "")
             
-            # Find the zipball URL from assets or use the zipball_url
+            # find download url from assets or use github's zipball.
             download_url = None
             assets = release_data.get("assets", [])
             
-            # Look for a source code zip
+            # prefer explicit .zip assets over zipball.
             for asset in assets:
                 if asset.get("name", "").endswith(".zip"):
                     download_url = asset.get("browser_download_url")
+                    logging.info(f"Found asset download URL: {download_url}")
                     break
             
-            # Fallback to zipball_url if no asset found
+            # fallback to github's automatic zipball url.
             if not download_url:
                 download_url = release_data.get("zipball_url")
+                logging.info(f"Using zipball_url: {download_url}")
+            
+            if not download_url:
+                logging.error("No download URL found in release data")
+                return False, latest_version, None, release_notes
             
             # Compare versions
             has_update = self._compare_versions(self.current_version, latest_version)
+            logging.info(f"Version comparison - Current: {self.current_version}, Latest: {latest_version}, Has update: {has_update}")
             
             return has_update, latest_version, download_url, release_notes
             
+        except requests.exceptions.Timeout:
+            logging.error("Update check timed out")
+            return False, None, None, None
+        except requests.exceptions.ConnectionError:
+            logging.error("Connection error while checking for updates")
+            return False, None, None, None
         except requests.exceptions.RequestException as e:
             logging.error(f"Error checking for updates: {e}")
+            return False, None, None, None
+        except (KeyError, ValueError, TypeError) as e:
+            logging.error(f"Error parsing update response: {e}")
             return False, None, None, None
         except Exception as e:
             logging.error(f"Unexpected error checking for updates: {e}")
@@ -171,10 +190,11 @@ class Updater:
         Returns True if latest > current
         """
         try:
+            # parse semantic versions (e.g., "1.0.5" -> [1, 0, 5]).
             current_parts = [int(x) for x in current.split('.')]
             latest_parts = [int(x) for x in latest.split('.')]
             
-            # Pad with zeros if needed
+            # pad shorter version with zeros for comparison.
             max_len = max(len(current_parts), len(latest_parts))
             current_parts += [0] * (max_len - len(current_parts))
             latest_parts += [0] * (max_len - len(latest_parts))
@@ -190,15 +210,15 @@ class Updater:
     
     def _get_preserved_dirs(self):
         """Get list of directories to preserve, including dynamic paths from config"""
-        preserved = list(BASE_PRESERVED_DIRS)  # Start with base dirs
+        preserved = list(BASE_PRESERVED_DIRS)
         
-        # Load config to find additional directories to preserve
+        # scan config for additional paths that exist inside the tool directory.
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     config = json.load(f)
                 
-                # Check paths in config
+                # check configured paths.
                 paths_to_check = [
                     config.get("game_install_dir", ""),
                     config.get("backup_dir", ""),
@@ -210,25 +230,25 @@ class Updater:
                     if not path:
                         continue
                     
-                    # Convert to absolute path
                     abs_path = os.path.abspath(path)
                     
-                    # Check if this path is inside the root directory
+                    # only preserve if path is inside the tool directory.
                     try:
                         rel_path = os.path.relpath(abs_path, root_dir)
-                        # If relative path doesn't start with .., it's inside root_dir
+                        # paths starting with ".." are outside root_dir.
                         if not rel_path.startswith('..'):
-                            # Get the top-level directory name
+                            # extract top-level directory name.
                             top_level = rel_path.split(os.sep)[0]
-                            # Check if this directory actually exists in the root dir
                             local_path = os.path.join(root_dir, top_level)
+                            
+                            # only add if it exists and isn't already in the list.
                             if top_level and top_level not in preserved and os.path.exists(local_path):
                                 preserved.append(top_level)
                                 logging.info(f"Will preserve directory from config: {top_level} (exists at {local_path})")
                             elif not os.path.exists(local_path):
                                 logging.info(f"Skipping {top_level} from config path {path} - doesn't exist locally")
                     except ValueError:
-                        # Different drives on Windows, skip
+                        # different drives on windows; skip.
                         pass
             except Exception as e:
                 logging.error(f"Error reading config for preserved dirs: {e}")
@@ -273,11 +293,22 @@ class Updater:
                 self._log_update(f"STEP 1: Downloading update from {download_url}")
                 zip_path = os.path.join(temp_dir, "update.zip")
                 
-                response = requests.get(download_url, timeout=30)
+                # Download with timeout and streaming for large files
+                response = requests.get(download_url, timeout=60, stream=True)
                 response.raise_for_status()
                 
+                # Write in chunks for better memory efficiency
+                total_size = int(response.headers.get('content-length', 0))
+                self._log_update(f"Download size: {total_size / 1024 / 1024:.2f} MB")
+                
                 with open(zip_path, 'wb') as f:
-                    f.write(response.content)
+                    downloaded = 0
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                
+                self._log_update(f"Download complete: {downloaded / 1024 / 1024:.2f} MB")
                 
                 self._log_update(f"STEP 2: Extracting update to temporary location")
                 # Step 2: Extract to temporary location
@@ -287,8 +318,7 @@ class Updater:
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     zip_ref.extractall(extract_dir)
                 
-                # Find the root directory in the extracted files
-                # GitHub releases typically have a single top-level directory
+                # github zips typically have one top-level folder; unwrap it.
                 extracted_items = os.listdir(extract_dir)
                 if len(extracted_items) == 1 and os.path.isdir(os.path.join(extract_dir, extracted_items[0])):
                     source_dir = os.path.join(extract_dir, extracted_items[0])
@@ -300,13 +330,14 @@ class Updater:
                 backup_dir = os.path.join(temp_dir, "user_backup")
                 os.makedirs(backup_dir, exist_ok=True)
                 
+                # backup directories.
                 for item in PRESERVED_DIRS:
                     src = os.path.join(root_dir, item)
                     if os.path.exists(src):
                         dst = os.path.join(backup_dir, item)
                         try:
                             if os.path.isdir(src):
-                                # Use ignore_dangling_symlinks to skip broken links
+                                # preserve symlinks, skip dangling ones.
                                 shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True)
                                 self._log_update(f"  ✓ Backed up directory: {item}")
                             else:

@@ -108,39 +108,71 @@ class ModManagerApp:
     
     # --- Config Management ---
     def _load_config(self):
+        """Load configuration from file"""
         if os.path.exists(CONFIG_FILE):
             try:
-                with open(CONFIG_FILE, "r") as f:
+                with open(CONFIG_FILE, "r", encoding='utf-8') as f:
                     config = json.load(f)
                 self.mod_install_dir = config.get("mod_install_dir", DEFAULT_MODS_DIR)
-                logging.info("Config loaded successfully.")
-            except Exception as e:
+                logging.info(f"Config loaded successfully: {self.mod_install_dir}")
+            except (json.JSONDecodeError, IOError) as e:
                 logging.error(f"Error loading config: {e}")
                 self.mod_install_dir = DEFAULT_MODS_DIR
+                messagebox.showwarning(
+                    "Config Error",
+                    f"Failed to load configuration. Using defaults.\nError: {e}",
+                    parent=self.root
+                )
+        else:
+            self.mod_install_dir = DEFAULT_MODS_DIR
 
     def _save_config(self):
+        """Save configuration to file"""
         try:
-            with open(CONFIG_FILE, "w") as f:
-                json.dump({"mod_install_dir": self.mod_install_dir}, f, indent=2)
+            # Load existing config to preserve other fields
+            config = {}
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, "r", encoding='utf-8') as f:
+                        config = json.load(f)
+                except:
+                    pass
+            
+            # Update mod_install_dir
+            config["mod_install_dir"] = self.mod_install_dir
+            
+            with open(CONFIG_FILE, "w", encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
             logging.info("Config saved successfully.")
-        except Exception as e:
+        except (IOError, OSError) as e:
             logging.error(f"Error saving config: {e}")
+            messagebox.showerror(
+                "Save Error",
+                f"Failed to save configuration.\nError: {e}",
+                parent=self.root
+            )
 
     # --- Profiles Management ---
     def _load_profiles(self):
+        """Load profiles from file"""
         if os.path.exists(PROFILES_FILE):
             try:
-                with open(PROFILES_FILE, "r") as f:
+                with open(PROFILES_FILE, "r", encoding='utf-8') as f:
                     data = json.load(f)
                 self.profiles = data.get("profiles", {})
                 self.current_profile = data.get("current_profile")
+                
+                # Perform migrations
                 self._convert_old_profiles()
                 self._migrate_absolute_paths_to_relative()
-                if self.current_profile in self.profiles:
+                
+                # Load current profile's install dir
+                if self.current_profile and self.current_profile in self.profiles:
                     rel_path = self.profiles[self.current_profile].get("mod_install_dir", DEFAULT_MODS_DIR)
                     self.mod_install_dir = self._resolve_install_dir(rel_path)
-                logging.info("Profiles loaded successfully.")
-            except Exception as e:
+                    
+                logging.info(f"Profiles loaded successfully. Current profile: {self.current_profile}")
+            except (json.JSONDecodeError, IOError) as e:
                 logging.error(f"Error loading profiles: {e}")
                 self.profiles = {}
                 self.current_profile = None
@@ -149,21 +181,34 @@ class ModManagerApp:
             self.current_profile = None
 
     def _save_profiles(self):
+        """Save profiles to file"""
         # Save current profile's mod_install_dir before saving profiles
-        if self.current_profile in self.profiles:
+        if self.current_profile and self.current_profile in self.profiles:
             profile = self.profiles[self.current_profile]
             if isinstance(profile, dict):
                 # Save as relative path
                 profile["mod_install_dir"] = self._make_path_relative(self.mod_install_dir)
             else:
-                self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": self._make_path_relative(self.mod_install_dir)}
+                # Old format: list of mod dicts. Convert to new format.
+                self.profiles[self.current_profile] = {
+                    "mods": profile,
+                    "mod_install_dir": self._make_path_relative(self.mod_install_dir)
+                }
 
         try:
-            with open(PROFILES_FILE, "w") as f:
-                json.dump({"profiles": self.profiles, "current_profile": self.current_profile}, f, indent=2)
+            with open(PROFILES_FILE, "w", encoding='utf-8') as f:
+                json.dump({
+                    "profiles": self.profiles,
+                    "current_profile": self.current_profile
+                }, f, indent=2)
             logging.info("Profiles saved successfully.")
-        except Exception as e:
+        except (IOError, OSError) as e:
             logging.error(f"Error saving profiles: {e}")
+            messagebox.showerror(
+                "Save Error",
+                f"Failed to save profiles.\nError: {e}",
+                parent=self.root
+            )
 
     def _convert_old_profiles(self):
         # Convert any old-format profile (list) to new dict format
@@ -944,11 +989,17 @@ class ModManagerApp:
             zip_path = os.path.join(temp_dir, "mod.zip")
 
             logging.info(f"Downloading mod from {url}...")
-            response = requests.get(url, timeout=20)
+            # Use streaming for better memory efficiency with large files
+            response = requests.get(url, timeout=30, stream=True)
             response.raise_for_status()
 
+            # Download in chunks
             with open(zip_path, "wb") as f:
-                f.write(response.content)
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            
+            logging.info(f"Download complete")
 
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 namelist = zip_ref.namelist()
@@ -956,12 +1007,14 @@ class ModManagerApp:
                 for name in namelist:
                     logging.info(f" - {name}")
 
-                # Detect single top-level directory (e.g. modname-master/)
+                # github zips often have a wrapper folder (e.g., "modname-master/").
                 top_dirs = set()
                 for name in namelist:
                     parts = name.split('/')
                     if len(parts) > 1 and parts[0]:
                         top_dirs.add(parts[0])
+                
+                # if all files are in one top-level dir, strip it.
                 if len(top_dirs) == 1:
                     top_dir = list(top_dirs)[0]
                     logging.info(f"Detected single top-level directory in ZIP: {top_dir}")
@@ -969,7 +1022,7 @@ class ModManagerApp:
                 else:
                     root_prefix = ''
 
-                # If mod_subdir is set, move down into that subdir
+                # navigate into subdirectory if specified by user.
                 if mod_subdir:
                     root_prefix = root_prefix + mod_subdir.rstrip('/') + '/'
 
@@ -978,10 +1031,11 @@ class ModManagerApp:
                 if not members:
                     raise FileNotFoundError(f"No files found under '{mod_subdir}' in the archive")
 
+                # extract files, stripping the prefix path.
                 for member in members:
                     relative_path = member[len(root_prefix):].lstrip('/')
                     if not relative_path:
-                        continue  # skip the directory itself
+                        continue
                     target_file_path = os.path.join(base_install_dir, relative_path)
 
                     if member.endswith('/'):
