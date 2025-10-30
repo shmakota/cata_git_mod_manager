@@ -25,6 +25,12 @@ def scan_mod_directory(directory):
                         elif not isinstance(content, list):
                             continue
 
+                        # check if this is a config/options.json file
+                        is_balance_option = 'config' in filepath and 'options.json' in filepath
+                        
+                        # check if this is data/raw/languages.json
+                        is_language = 'data' in filepath and 'raw' in filepath and 'languages.json' in filepath
+
                         for entry in content:
                             if not isinstance(entry, dict):
                                 continue
@@ -63,6 +69,64 @@ def scan_mod_directory(directory):
                                 })
                                 continue
 
+                            # Special handling for name entries (city/world names)
+                            elif 'usage' in entry and 'name' in entry:
+                                usage = entry.get('usage', 'unknown')
+                                name_val = entry.get('name', '')
+                                mod_data.append({
+                                    'type': f'name_{usage}',
+                                    'id': name_val,
+                                    'name': name_val,
+                                    'name_plural': '',
+                                    'description': f'{usage.capitalize()} name',
+                                    'file': filepath,
+                                    'full': entry
+                                })
+                                continue
+
+                            # Special handling for config/options.json entries
+                            elif is_balance_option and 'name' in entry:
+                                option_name = entry.get('name', 'unknown')
+                                option_info = entry.get('info', '')
+                                option_default = entry.get('default', '')
+                                option_value = entry.get('value', '')
+                                
+                                # combine info, default, and value for description
+                                desc_parts = []
+                                if option_info:
+                                    desc_parts.append(option_info)
+                                if option_default:
+                                    desc_parts.append(option_default)
+                                if option_value:
+                                    desc_parts.append(f"Current: {option_value}")
+                                
+                                mod_data.append({
+                                    'type': 'balance_option',
+                                    'id': option_name,
+                                    'name': option_name,
+                                    'name_plural': '',
+                                    'description': ' | '.join(desc_parts) if desc_parts else 'Balance option',
+                                    'file': filepath,
+                                    'full': entry
+                                })
+                                continue
+
+                            # Special handling for data/raw/languages.json entries
+                            elif is_language:
+                                lang_id = entry.get('id', entry.get('type', 'unknown'))
+                                lang_name = entry.get('name', lang_id)
+                                
+                                mod_data.append({
+                                    'type': 'language',
+                                    'id': lang_id,
+                                    'name': lang_name,
+                                    'name_plural': '',
+                                    'description': f'Language: {lang_name}',
+                                    'file': filepath,
+                                    'full': entry
+                                })
+                                continue
+
                             # General fallback for all other JSON types
                             name = entry.get('name')
                             desc = entry.get('description') or entry.get('desc')
@@ -92,7 +156,7 @@ def scan_mod_directory(directory):
                                     name_str = fallback_text
                                     desc_str = fallback_text
                                 else:
-                                    desc_str = "This type has not yet been fully implemented. Bug the GitHub!"
+                                    desc_str = "null"
 
                             name_str = re.sub(r'</?color[^>]*>', '', name_str)
 
@@ -198,7 +262,12 @@ class ModViewerApp(tk.Tk):
 
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", self.update_filter)
-        tk.Entry(search_frame, textvariable=self.search_var).pack(side='left', fill='x', expand=True)
+        search_entry = tk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.pack(side='left', fill='x', expand=True)
+        
+        # help tooltip button
+        help_btn = tk.Button(search_frame, text="?", width=2, command=self.show_search_help)
+        help_btn.pack(side='left', padx=(5, 0))
 
         self.use_new_order = tk.BooleanVar(value=True)
         tk.Checkbutton(search_frame, text="Swap Columns", variable=self.use_new_order, command=self.update_order_and_refresh).pack(side='right', padx=(10, 0))
@@ -283,6 +352,51 @@ class ModViewerApp(tk.Tk):
         except Exception as e:
             print(f"[!] Failed to open path {path}: {e}")
 
+    def show_search_help(self):
+        """Show help dialog for search features"""
+        help_text = """Search Features:
+
+Basic Search:
+  • Type any text to search entries
+  • Select field from dropdown to search specific fields
+
+Exclusion Filter:
+  • Use -"text" to EXCLUDE results containing that text
+  • Example: gun -"zombie" 
+    (shows guns but excludes anything with "zombie")
+  
+  • Multiple exclusions: gun -"zombie" -"broken"
+    (excludes both zombie and broken items)
+
+Advanced:
+  • Combine inclusions and exclusions
+  • Case-insensitive search
+  • Works across all selected fields"""
+        
+        # create custom dialog with text widget
+        help_window = tk.Toplevel(self)
+        help_window.title("Search Help")
+        help_window.geometry("500x350")
+        help_window.transient(self)
+        help_window.grab_set()
+        
+        # text widget with scrollbar
+        text_frame = tk.Frame(help_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("TkDefaultFont", 10))
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=text_widget.yview)
+        
+        text_widget.insert(tk.END, help_text)
+        text_widget.config(state=tk.DISABLED)
+        
+        # close button
+        tk.Button(help_window, text="Close", command=help_window.destroy, width=15).pack(pady=(0, 10))
+    
     def save_results(self):
         """Save all currently filtered entries to a file"""
         if not self.filtered_data:
@@ -341,6 +455,13 @@ class ModViewerApp(tk.Tk):
         query = self.search_var.get().lower()
         field = self.search_field.get()
 
+        # parse exclusions using -"text" pattern
+        exclusion_pattern = r'-"([^"]+)"'
+        exclusions = re.findall(exclusion_pattern, query)
+        
+        # remove exclusions from main query
+        clean_query = re.sub(exclusion_pattern, '', query).strip()
+
         def match(entry):
             fields = {
                 'ID': str(entry['id']),
@@ -348,9 +469,27 @@ class ModViewerApp(tk.Tk):
                 'Description': str(entry.get('description', '')),
                 'Type': str(entry.get('type', ''))
             }
-            if field == 'All':
-                return any(query in v.lower() for v in fields.values())
-            return query in fields.get(field, '').lower()
+            
+            # check if entry matches the inclusion query
+            if clean_query:
+                if field == 'All':
+                    if not any(clean_query in v.lower() for v in fields.values()):
+                        return False
+                else:
+                    if clean_query not in fields.get(field, '').lower():
+                        return False
+            
+            # check if entry contains any exclusions
+            for exclusion in exclusions:
+                exclusion = exclusion.lower()
+                if field == 'All':
+                    if any(exclusion in v.lower() for v in fields.values()):
+                        return False
+                else:
+                    if exclusion in fields.get(field, '').lower():
+                        return False
+            
+            return True
 
         self.filtered_data = [e for e in self.mod_data if match(e)]
         self.populate_tree()

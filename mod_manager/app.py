@@ -95,6 +95,46 @@ class ModManagerApp:
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export profile:\n{e}", parent=self.root)
 
+    def _import_profile(self):
+        import_path = filedialog.askopenfilename(
+            title="Import Profile",
+            filetypes=[("JSON files", "*.json")],
+            parent=self.root
+        )
+        if not import_path:
+            return
+
+        try:
+            with open(import_path, "r") as f:
+                data = json.load(f)
+
+            # expecting data like: {"profile_name": {profile_data}}
+            for name, pdata in data.items():
+                if name in self.logic.profiles:
+                    overwrite = messagebox.askyesno(
+                        "Overwrite Profile?",
+                        f"Profile '{name}' already exists. Overwrite?",
+                        parent=self.root
+                    )
+                    if not overwrite:
+                        continue
+                self.logic.profiles[name] = pdata
+
+            # auto-switch to last imported profile
+            self.logic.current_profile = list(data.keys())[-1]
+            self.profile_var.set(self.logic.current_profile)
+            self.logic.save_profiles()
+            self._refresh_profile_combo()
+            self._refresh_mod_list()
+
+            if hasattr(self, "profile_manager_dialog"):
+                new_profile_name = self.profile_var.get()
+                self.profile_manager_dialog.update_profile_name(new_profile_name)
+            
+            messagebox.showinfo("Import Success", "Profile(s) imported successfully.", parent=self.root)
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to import profile:\n{e}", parent=self.root)
+
     def _refresh_installed_mods(self):
         self.installed_listbox.delete(0, tk.END)
         folder_path = self._get_installed_folder_base()
