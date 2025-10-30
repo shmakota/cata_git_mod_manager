@@ -73,6 +73,7 @@ class CataInstallerApp:
         # Dropdown
         self.dropdown = ttk.Combobox(root, state="readonly", width=60)
         self.dropdown.pack(padx=10, pady=(5, 10))
+        self.dropdown.set("Loading releases...")
 
         # Buttons
         btn_frame = tk.Frame(root)
@@ -93,8 +94,11 @@ class CataInstallerApp:
         self.launch_btn = tk.Button(root, text="Launch Game", command=self.launch_game, bg="green", fg="white")
         self.launch_btn.pack(pady=10)
 
-        self.fetch_releases()
+        # load installed version immediately (fast)
         self.load_installed_version()
+        
+        # fetch releases after window is shown (slower, async)
+        self.root.after(100, self.fetch_releases)
 
     def save_installed_version(self, version):
         """Save the installed game version
@@ -149,6 +153,10 @@ class CataInstallerApp:
 
     def fetch_releases(self):
         try:
+            # show loading state
+            self.dropdown.set("Loading releases from GitHub...")
+            self.root.update()
+            
             if self.use_experimental.get():
                 response = requests.get(EXPERIMENTAL_API)
                 response.raise_for_status()
@@ -187,7 +195,10 @@ class CataInstallerApp:
                 self.dropdown.current(0)
                 self.selected_release = self.releases[0]
                 self.dropdown.bind("<<ComboboxSelected>>", self.on_select)
+            else:
+                self.dropdown.set("No releases found")
         except Exception as e:
+            self.dropdown.set("Failed to load releases")
             messagebox.showerror("Error", f"Failed to fetch releases:\n{e}")
     
     def toggle_experimental(self):
@@ -269,10 +280,24 @@ class CataInstallerApp:
         name = asset["name"]
 
         try:
-            messagebox.showinfo("Download", f"Downloading {name}...")
+            # create non-blocking status window
+            status_window = tk.Toplevel(self.root)
+            status_window.title("Downloading...")
+            status_window.geometry("400x100")
+            status_window.transient(self.root)
+            status_window.resizable(False, False)
+            
+            status_label = tk.Label(status_window, text=f"Downloading {name}...\nPlease wait...", pady=20)
+            status_label.pack()
+            
+            self.root.update()
+            
             response = requests.get(url, stream=True)
             response.raise_for_status()
             data = BytesIO(response.content)
+            
+            # close status window
+            status_window.destroy()
 
             os.makedirs(INSTALL_DIR, exist_ok=True)
 

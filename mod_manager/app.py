@@ -920,6 +920,47 @@ class ModManagerApp:
 
         self.root.after(100, self._update_mods_worker)
 
+    def _show_error_dialog(self, title, message, errors):
+        """show a scrollable error dialog for long error messages
+        
+        args:
+            title: dialog window title
+            message: header message
+            errors: list of error tuples (name, error_message)
+        """
+        dialog = Toplevel(self.root)
+        dialog.title(title)
+        dialog.geometry("700x500")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # header label
+        header_label = Label(dialog, text=message, font=("TkDefaultFont", 11, "bold"))
+        header_label.pack(padx=20, pady=(20, 10), anchor="w")
+        
+        # scrollable text frame
+        text_frame = tk.Frame(dialog)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+        
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        error_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("TkDefaultFont", 10))
+        error_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=error_text.yview)
+        
+        # populate error text
+        for name, error in errors:
+            error_text.insert(tk.END, f"• {name}\n", "bold")
+            error_text.insert(tk.END, f"  {error}\n\n")
+        
+        # make bold tag
+        error_text.tag_config("bold", font=("TkDefaultFont", 10, "bold"))
+        error_text.config(state=tk.DISABLED)
+        
+        # close button
+        tk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=(0, 20))
+
     def _update_mods_worker(self, mod_index=0, errors=None, success_count=0):
         """Recursively update mods with delays between each one"""
         if errors is None:
@@ -932,8 +973,8 @@ class ModManagerApp:
             self.update_popup.destroy()
 
             if errors:
-                msg = "Some mods failed to update:\n" + "\n".join(errors)
-                messagebox.showerror("Update Errors", msg, parent=self.root)
+                # create scrollable error dialog for long error messages
+                self._show_error_dialog("Update Errors", "Some mods failed to update:", errors)
             else:
                 messagebox.showinfo("Update Complete", f"Successfully updated {success_count} mods.", parent=self.root)
             return

@@ -123,7 +123,7 @@ class BackupViewerCreator:
         # Bottom: info display
         info_frame = ttk.LabelFrame(self.root, text="Details", padding=5)
         info_frame.pack(fill=tk.X, padx=5, pady=5)
-        self.info_text = tk.Text(info_frame, height=8, state='disabled', wrap='word')
+        self.info_text = tk.Text(info_frame, height=10, state='disabled', wrap='word')
         self.info_text.pack(fill=tk.X)
 
     def select_folder(self):
@@ -134,6 +134,50 @@ class BackupViewerCreator:
         self.folder_label.config(text=folder)
         self.populate_current()
         self.populate_backup()
+
+    def _extract_mod_list(self, world_path):
+        """extract list of mods from world save folder
+        
+        args:
+            world_path: path to the world save folder
+            
+        returns:
+            list of mod names, or empty list if not found
+        """
+        mods = []
+        
+        # check for mods.json in the world folder (cataclysm saves mod list here)
+        mods_json_path = os.path.join(world_path, 'mods.json')
+        if os.path.isfile(mods_json_path):
+            try:
+                with open(mods_json_path, 'r', encoding='utf-8') as f:
+                    mods_data = json.load(f)
+                    # mods.json is typically a list of mod IDs
+                    if isinstance(mods_data, list):
+                        mods = mods_data
+                    elif isinstance(mods_data, dict):
+                        # some versions might store it differently
+                        mods = mods_data.get('mods', [])
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to read mods.json: {e}")
+        
+        # if mods.json doesn't exist, try worldoptions.json or worldoptions.txt
+        if not mods:
+            worldoptions_path = os.path.join(world_path, 'worldoptions.json')
+            if os.path.isfile(worldoptions_path):
+                try:
+                    with open(worldoptions_path, 'r', encoding='utf-8') as f:
+                        options = json.load(f)
+                        # worldoptions might have a mods list
+                        if isinstance(options, list):
+                            for opt in options:
+                                if isinstance(opt, dict) and opt.get('name') == 'ACTIVE_WORLD_MODS':
+                                    mods = opt.get('value', [])
+                                    break
+                except (json.JSONDecodeError, IOError) as e:
+                    print(f"Warning: Failed to read worldoptions.json: {e}")
+        
+        return mods
 
     def create_backup(self):
         """Create backup archives for selected folders"""
@@ -170,8 +214,17 @@ class BackupViewerCreator:
                 # create backup archive.
                 shutil.make_archive(zip_path, 'zip', src)
                 
+                # extract mod list from the world save.
+                mod_list = self._extract_mod_list(src)
+                
                 # save metadata alongside the zip.
-                meta = {'name': d, 'timestamp': ts, 'description': desc or ''}
+                meta = {
+                    'name': d,
+                    'timestamp': ts,
+                    'description': desc or '',
+                    'mods': mod_list,
+                    'mod_count': len(mod_list)
+                }
                 with open(zip_path + '.json', 'w', encoding='utf-8') as sf:
                     json.dump(meta, sf, indent=2)
                 
@@ -276,8 +329,27 @@ class BackupViewerCreator:
             name, ctime = self.left_folders[i]
             path = os.path.join(self.folder, name)
             mtime = datetime.fromtimestamp(os.path.getmtime(path))
-            info.append(f"World: {name} | Created: {ctime.strftime('%Y-%m-%d %H:%M:%S')} | Modified: {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
-        self.show_info("\n".join(info))
+            
+            # extract mod list from current world
+            mod_list = self._extract_mod_list(path)
+            
+            parts = []
+            parts.append(f"World: {name}")
+            parts.append(f"Created: {ctime.strftime('%Y-%m-%d %H:%M:%S')}")
+            parts.append(f"Modified: {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # show mod information if available
+            if mod_list:
+                parts.append(f"Mods: {len(mod_list)}")
+                # show first few mods as preview
+                if len(mod_list) <= 5:
+                    mod_preview = ", ".join(mod_list)
+                else:
+                    mod_preview = ", ".join(mod_list[:5]) + f", ... (+{len(mod_list)-5} more)"
+                parts.append(f"  → {mod_preview}")
+            
+            info.append("\n".join(parts))
+        self.show_info("\n\n".join(info))
 
 
     def on_select_backup(self, event):
@@ -298,13 +370,27 @@ class BackupViewerCreator:
                     date_str = ts
             desc = m.get('description', '')
             world = m.get('name', '')
+            mod_list = m.get('mods', [])
+            mod_count = m.get('mod_count', len(mod_list))
+            
             parts = []
             if desc:
                 parts.append(f"Description: {desc}")
             parts.append(f"World: {world}")
             parts.append(f"Time: {date_str}")
-            info.append(" | ".join(parts))
-        self.show_info("\n".join(info))
+            
+            # add mod information if available
+            if mod_list:
+                parts.append(f"Mods: {mod_count}")
+                # show first few mods as preview
+                if len(mod_list) <= 5:
+                    mod_preview = ", ".join(mod_list)
+                else:
+                    mod_preview = ", ".join(mod_list[:5]) + f", ... (+{len(mod_list)-5} more)"
+                parts.append(f"  → {mod_preview}")
+            
+            info.append("\n".join(parts))
+        self.show_info("\n\n".join(info))
         
 
     def load_backup(self):
