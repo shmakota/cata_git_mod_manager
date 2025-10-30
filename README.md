@@ -41,6 +41,6 @@ Clone the repo and run the install/launch script. Follow the Usage guide below t
 1. Use the launcher to download the latest version.
 2. Create a mod profile, or download an existing one from the discord.
 3. Add any additional mod repos – Input GitHub URLs pointing to mod or modpack repositories.
-4. Set the content manager's profile install directory to the Cataclysm BN installation's root folder.
+4. Set the content manager's profile install directory to the userdata folder.
 5. One-click update – The tool pulls the latest versions of all mods from the defined GitHub sources.
 6. Automatic scanning – The tool locates all valid mods via their `modinfo.json`, even in nested subfolders. If necessary, you can define specific subdirectories.
