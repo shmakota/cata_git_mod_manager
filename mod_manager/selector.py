@@ -65,26 +65,185 @@ class MultitoolApp:
             btn = tk.Button(root, text=tool_name, width=25, command=lambda s=script: launch_tool(s))
             btn.pack(pady=5)
         
-        # Update button at bottom
+        # Community & Updates button at bottom
+        community_frame = tk.Frame(root)
+        community_frame.pack(pady=(10, 5))
+        
+        self.community_button = tk.Button(
+            community_frame,
+            text="Community & Updates",
+            command=self._open_community_window,
+            width=25,
+            anchor="center"
+        )
+        self.community_button.pack()
+    
+    def _open_community_window(self):
+        """Open the Community & Updates window with links and update checker"""
+        import webbrowser
+        
+        window = Toplevel(self.root)
+        window.title("Community & Updates")
+        window.geometry("500x600")
+        window.transient(self.root)
+        window.grab_set()
+        
+        # Title
+        title_label = Label(
+            window,
+            text="Cataclysm: Bright Nights Community",
+            font=("TkDefaultFont", 14, "bold")
+        )
+        title_label.pack(pady=15)
+        
+        # Update section (moved to top)
         if UPDATER_AVAILABLE:
-            update_frame = tk.Frame(root)
-            update_frame.pack(pady=(10, 5))
+            update_section = tk.Frame(window)
+            update_section.pack(pady=10)
             
-            self.update_button = tk.Button(
-                update_frame,
-                text="Check for Updates",
-                command=self._check_for_updates,
-                width=25,
-                anchor="center"
+            tk.Label(
+                update_section,
+                text="Multitool Updates:",
+                font=("TkDefaultFont", 11, "bold")
+            ).pack()
+            
+            version_label = Label(
+                update_section,
+                text=f"Current Version: v{self.version}",
+                fg="gray"
             )
-            self.update_button.pack()
+            version_label.pack(pady=5)
             
-            # Store original button configuration for consistency
-            self.original_button_config = {
-                'width': 25,
-                'fg': self.update_button.cget('fg'),
-                'font': self.update_button.cget('font')
+            self.community_update_button = tk.Button(
+                update_section,
+                text="Check for Updates",
+                command=lambda: self._check_for_updates_in_community(window),
+                width=30
+            )
+            self.community_update_button.pack(pady=5)
+            
+            # github link for multitool
+            github_btn = tk.Button(
+                update_section,
+                text="📦 Multitool GitHub",
+                command=lambda: webbrowser.open("https://github.com/shmakota/cata_git_mod_manager"),
+                width=30
+            )
+            github_btn.pack(pady=(5, 0))
+            
+            # Store original button configuration
+            self.community_original_button_config = {
+                'width': 30,
+                'fg': self.community_update_button.cget('fg'),
+                'font': self.community_update_button.cget('font')
             }
+        else:
+            tk.Label(
+                window,
+                text="Updater not available",
+                fg="gray"
+            ).pack(pady=10)
+        
+        # Separator
+        separator = ttk.Separator(window, orient='horizontal')
+        separator.pack(fill='x', padx=20, pady=15)
+        
+        # Community links section
+        links_frame = tk.Frame(window)
+        links_frame.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
+        
+        tk.Label(
+            links_frame,
+            text="Community Links:",
+            font=("TkDefaultFont", 11, "bold")
+        ).pack(pady=(0, 10))
+        
+        # Define community links
+        links = [
+            ("📖 Official Documentation", "https://docs.cataclysmbn.org/"),
+            ("🎮 Discord Server", "https://discord.gg/XW7XhXuZ89"),
+            ("💬 Subreddit (r/cataclysmbn)", "https://www.reddit.com/r/cataclysmbn/"),
+            ("📚 Hitchhiker's Guide", "https://next.cbn-guide.pages.dev/?t=UNDEAD_PEOPLE"),
+            ("🔧 BN GitHub", "https://github.com/cataclysmbnteam/Cataclysm-BN")
+        ]
+        
+        # Create buttons for each link
+        for label, url in links:
+            btn = tk.Button(
+                links_frame,
+                text=label,
+                command=lambda u=url: webbrowser.open(u),
+                width=40,
+                anchor="w"
+            )
+            btn.pack(pady=3)
+        
+        # Close button
+        tk.Button(
+            window,
+            text="Close",
+            command=window.destroy,
+            width=15
+        ).pack(pady=(10, 15))
+    
+    def _check_for_updates_in_community(self, parent_window):
+        """Check for updates from within the community window"""
+        if not UPDATER_AVAILABLE:
+            messagebox.showerror("Error", "Updater module not available", parent=parent_window)
+            return
+        
+        # Update button to show checking
+        original_text = self.community_update_button.cget("text")
+        self.community_update_button.config(
+            text="Checking...",
+            state="disabled",
+            width=self.community_original_button_config['width']
+        )
+        parent_window.update()
+        
+        try:
+            has_update, latest_version, download_url, release_notes = self.updater.check_for_updates()
+            
+            if has_update and latest_version:
+                # Update button appearance
+                self.community_update_button.config(
+                    text=f"Update Available (v{latest_version})",
+                    fg="green",
+                    font=self.community_original_button_config['font'],
+                    state="normal",
+                    width=self.community_original_button_config['width']
+                )
+                # Close community window and show update dialog
+                parent_window.destroy()
+                self._show_update_dialog(latest_version, download_url, release_notes)
+            else:
+                # Reset button
+                self.community_update_button.config(
+                    text=original_text,
+                    state="normal",
+                    fg=self.community_original_button_config['fg'],
+                    font=self.community_original_button_config['font'],
+                    width=self.community_original_button_config['width']
+                )
+                messagebox.showinfo(
+                    "No Updates",
+                    f"You are running the latest version (v{self.version}).",
+                    parent=parent_window
+                )
+        except Exception as e:
+            # Reset button on error
+            self.community_update_button.config(
+                text=original_text,
+                state="normal",
+                fg=self.community_original_button_config['fg'],
+                font=self.community_original_button_config['font'],
+                width=self.community_original_button_config['width']
+            )
+            messagebox.showerror(
+                "Update Check Failed",
+                f"Failed to check for updates:\n{e}",
+                parent=parent_window
+            )
     
     def _check_for_updates(self):
         """Manual update check triggered by button"""

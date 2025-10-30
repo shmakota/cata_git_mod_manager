@@ -731,7 +731,8 @@ class ModManagerApp:
             self._download_and_extract_mod(mod)
             success_count += 1
         except Exception as e:
-            errors.append(f"{mod['url']}: {e}")
+            # append as tuple (name, error) for the dialog
+            errors.append((mod_name, str(e)))
             logging.error(f"Error updating mod {mod['url']}: {e}")
         
         # Schedule the next mod update after 50ms delay
