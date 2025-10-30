@@ -13,6 +13,8 @@ import re
 from tkinter import filedialog, messagebox, simpledialog, ttk, Toplevel, Label
 from profile_dialog import ProfileManagerDialog
 from edit_mod_dialog import EditModDialog
+from content_manager.dialogs import UpdateProgressDialog, show_error_dialog
+from content_manager.logic import ContentManagerLogic
 
 # Setup logging
 logging.basicConfig(
@@ -42,228 +44,36 @@ class ModManagerApp:
         self.root.geometry("950x650")
         self.root.minsize(950, 650)
     
-        self._ensure_config_files_exist()
-        self.clear_log()
+        # initialize business logic layer
+        self.logic = ContentManagerLogic(self.root)
+        self.logic._ensure_config_files_exist()
+        ContentManagerLogic.clear_log()
 
-        self.mod_install_dir = DEFAULT_MODS_DIR
-        self.profiles = {}
-        self.current_profile = None
-        
-        self._load_config()
-        self._load_profiles()
+        # load configuration and profiles
+        self.logic.load_config()
+        self.logic.load_profiles()
 
         self._build_ui()
 
-        if not self.profiles:
+        # create default profile if none exist
+        if not self.logic.profiles:
             self._create_profile("default")
 
-        if not self.current_profile or self.current_profile not in self.profiles:
-            self.current_profile = list(self.profiles.keys())[0]
+        # ensure current profile is set
+        if not self.logic.current_profile or self.logic.current_profile not in self.logic.profiles:
+            self.logic.current_profile = list(self.logic.profiles.keys())[0]
 
-        self.profile_var.set(self.current_profile)
+        self.profile_var.set(self.logic.current_profile)
         self._refresh_profile_combo()
         self._refresh_mod_list()
         self._refresh_installed_mods()
     
-    def clear_log(self, log_file='mod_debug.log'):
-        """Clears the contents of the specified log file."""
-        with open(log_file, 'w'):
-            pass  # Just open in write mode to truncate the file
-        logging.info('Log file has been cleared.')
-    
-    def _ensure_config_files_exist(self):
-        # Ensure default mod directory exists
-        if not os.path.isdir(DEFAULT_MODS_DIR):
-            try:
-                os.makedirs(DEFAULT_MODS_DIR)
-                logging.info(f"Created default mod directory at: {DEFAULT_MODS_DIR}")
-            except Exception as e:
-                logging.error(f"Failed to create default mod directory: {e}")
-
-        # Ensure config file exists
-        if not os.path.isfile(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "w") as f:
-                    json.dump({"mod_install_dir": DEFAULT_MODS_DIR}, f, indent=2)
-                logging.info("Created config file with default mod path.")
-            except Exception as e:
-                logging.error(f"Failed to create config file: {e}")
-
-        # Ensure profiles file exists
-        profiles_dir = os.path.dirname(PROFILES_FILE)
-        if not os.path.isdir(profiles_dir):
-            try:
-                os.makedirs(profiles_dir)
-                logging.info(f"Created profiles directory at: {profiles_dir}")
-            except Exception as e:
-                logging.error(f"Failed to create profiles directory: {e}")
-
-        if not os.path.isfile(PROFILES_FILE):
-            try:
-                with open(PROFILES_FILE, "w") as f:
-                    json.dump({}, f, indent=2)  # Empty dict for initial profiles
-                logging.info(f"Created empty profiles file at: {PROFILES_FILE}")
-            except Exception as e:
-                logging.error(f"Failed to create profiles file: {e}")
-    
-    # --- Config Management ---
-    def _load_config(self):
-        """Load configuration from file"""
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding='utf-8') as f:
-                    config = json.load(f)
-                self.mod_install_dir = config.get("mod_install_dir", DEFAULT_MODS_DIR)
-                logging.info(f"Config loaded successfully: {self.mod_install_dir}")
-            except (json.JSONDecodeError, IOError) as e:
-                logging.error(f"Error loading config: {e}")
-                self.mod_install_dir = DEFAULT_MODS_DIR
-                messagebox.showwarning(
-                    "Config Error",
-                    f"Failed to load configuration. Using defaults.\nError: {e}",
-                    parent=self.root
-                )
-        else:
-            self.mod_install_dir = DEFAULT_MODS_DIR
-
-    def _save_config(self):
-        """Save configuration to file"""
-        try:
-            # Load existing config to preserve other fields
-            config = {}
-            if os.path.exists(CONFIG_FILE):
-                try:
-                    with open(CONFIG_FILE, "r", encoding='utf-8') as f:
-                        config = json.load(f)
-                except:
-                    pass
-            
-            # Update mod_install_dir
-            config["mod_install_dir"] = self.mod_install_dir
-            
-            with open(CONFIG_FILE, "w", encoding='utf-8') as f:
-                json.dump(config, f, indent=2)
-            logging.info("Config saved successfully.")
-        except (IOError, OSError) as e:
-            logging.error(f"Error saving config: {e}")
-            messagebox.showerror(
-                "Save Error",
-                f"Failed to save configuration.\nError: {e}",
-                parent=self.root
-            )
-
-    # --- Profiles Management ---
-    def _load_profiles(self):
-        """Load profiles from file"""
-        if os.path.exists(PROFILES_FILE):
-            try:
-                with open(PROFILES_FILE, "r", encoding='utf-8') as f:
-                    data = json.load(f)
-                self.profiles = data.get("profiles", {})
-                self.current_profile = data.get("current_profile")
-                
-                # Perform migrations
-                self._convert_old_profiles()
-                self._migrate_absolute_paths_to_relative()
-                
-                # Load current profile's install dir
-                if self.current_profile and self.current_profile in self.profiles:
-                    rel_path = self.profiles[self.current_profile].get("mod_install_dir", DEFAULT_MODS_DIR)
-                    self.mod_install_dir = self._resolve_install_dir(rel_path)
-                    
-                logging.info(f"Profiles loaded successfully. Current profile: {self.current_profile}")
-            except (json.JSONDecodeError, IOError) as e:
-                logging.error(f"Error loading profiles: {e}")
-                self.profiles = {}
-                self.current_profile = None
-        else:
-            self.profiles = {}
-            self.current_profile = None
-
-    def _save_profiles(self):
-        """Save profiles to file"""
-        # Save current profile's mod_install_dir before saving profiles
-        if self.current_profile and self.current_profile in self.profiles:
-            profile = self.profiles[self.current_profile]
-            if isinstance(profile, dict):
-                # Save as relative path
-                profile["mod_install_dir"] = self._make_path_relative(self.mod_install_dir)
-            else:
-                # Old format: list of mod dicts. Convert to new format.
-                self.profiles[self.current_profile] = {
-                    "mods": profile,
-                    "mod_install_dir": self._make_path_relative(self.mod_install_dir)
-                }
-
-        try:
-            with open(PROFILES_FILE, "w", encoding='utf-8') as f:
-                json.dump({
-                    "profiles": self.profiles,
-                    "current_profile": self.current_profile
-                }, f, indent=2)
-            logging.info("Profiles saved successfully.")
-        except (IOError, OSError) as e:
-            logging.error(f"Error saving profiles: {e}")
-            messagebox.showerror(
-                "Save Error",
-                f"Failed to save profiles.\nError: {e}",
-                parent=self.root
-            )
-
-    def _convert_old_profiles(self):
-        # Convert any old-format profile (list) to new dict format
-        for name, pdata in list(self.profiles.items()):
-            if isinstance(pdata, list):
-                self.profiles[name] = {"mods": pdata, "mod_install_dir": DEFAULT_MODS_DIR}
-    
-    def _migrate_absolute_paths_to_relative(self):
-        """Convert absolute paths to relative paths for portability"""
-        cwd = os.getcwd()
-        for name, profile in self.profiles.items():
-            if isinstance(profile, dict):
-                old_path = profile.get("mod_install_dir", "")
-                if old_path and os.path.isabs(old_path):
-                    # Convert absolute path to relative
-                    try:
-                        rel_path = os.path.relpath(old_path, cwd)
-                        # If the relative path would go outside the project, keep it as is
-                        if not rel_path.startswith('..'):
-                            profile["mod_install_dir"] = rel_path
-                            logging.info(f"Migrated absolute path '{old_path}' to relative '{rel_path}' for profile '{name}'")
-                    except ValueError:
-                        # Paths on different drives on Windows, keep absolute
-                        logging.warning(f"Could not convert path '{old_path}' to relative, keeping absolute")
-    
-    def _make_path_relative(self, path):
-        """Convert a path to relative if it's within the project directory"""
-        if not path or not os.path.isabs(path):
-            return path
-        cwd = os.getcwd()
-        try:
-            rel_path = os.path.relpath(path, cwd)
-            # If the relative path would go outside the project, keep absolute
-            if rel_path.startswith('..'):
-                return path
-            return rel_path
-        except ValueError:
-            # Different drives on Windows, keep absolute
-            return path
-    
-    def _resolve_install_dir(self, path):
-        """Resolve a path (relative or absolute) to absolute for use"""
-        if not path:
-            return DEFAULT_MODS_DIR
-        if os.path.isabs(path):
-            return path
-        # Make relative paths absolute relative to current working directory
-        return os.path.abspath(path)
-    
     def _export_profile(self):
-        if not self.current_profile:
+        if not self.logic.current_profile:
             messagebox.showerror("Error", "No profile selected.", parent=self.root)
             return
 
-        profile_data = self.profiles.get(self.current_profile)
+        profile_data = self.logic.profiles.get(self.logic.current_profile)
         if not profile_data:
             messagebox.showerror("Error", "Current profile data not found.", parent=self.root)
             return
@@ -272,7 +82,7 @@ class ModManagerApp:
             title="Export Profile",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json")],
-            initialfile=f"{self.current_profile}.json",
+            initialfile=f"{self.logic.current_profile}.json",
             parent=self.root
         )
         if not export_path:
@@ -280,75 +90,7 @@ class ModManagerApp:
 
         try:
             with open(export_path, "w") as f:
-                json.dump({self.current_profile: profile_data}, f, indent=2)
-            messagebox.showinfo("Export Success", f"Profile exported to:\n{export_path}", parent=self.root)
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export profile:\n{e}", parent=self.root)
-
-    def _import_profile(self):
-        import_path = filedialog.askopenfilename(
-            title="Import Profile",
-            filetypes=[("JSON files", "*.json")],
-            parent=self.root
-        )
-        if not import_path:
-            return
-
-        try:
-            with open(import_path, "r") as f:
-                data = json.load(f)
-
-            # Expecting data like: {"profile_name": {profile_data}}
-            for name, pdata in data.items():
-                if name in self.profiles:
-                    overwrite = messagebox.askyesno(
-                        "Overwrite Profile?",
-                        f"Profile '{name}' already exists. Overwrite?",
-                        parent=self.root
-                    )
-                    if not overwrite:
-                        continue
-                self.profiles[name] = pdata
-
-            # Auto-switch to last imported profile
-            self.current_profile = list(data.keys())[-1]
-            self.profile_var.set(self.current_profile)
-            self._save_profiles()
-            self._refresh_profile_combo()
-            self._refresh_mod_list()
-
-            if hasattr(self, "profile_manager_dialog"):
-                new_profile_name = self.profile_var.get()  # or whatever is current
-                self.profile_manager_dialog.update_profile_name(new_profile_name)
-            
-            messagebox.showinfo("Import Success", "Profile(s) imported successfully.", parent=self.root)
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Failed to import profile:\n{e}", parent=self.root)
-         # Then update label if dialog is open
-    
-    def _export_profile(self):
-        if not self.current_profile:
-            messagebox.showerror("Error", "No profile selected.", parent=self.root)
-            return
-
-        profile_data = self.profiles.get(self.current_profile)
-        if not profile_data:
-            messagebox.showerror("Error", "Current profile data not found.", parent=self.root)
-            return
-
-        export_path = filedialog.asksaveasfilename(
-            title="Export Profile",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json")],
-            initialfile=f"{self.current_profile}.json",
-            parent=self.root
-        )
-        if not export_path:
-            return
-
-        try:
-            with open(export_path, "w") as f:
-                json.dump({self.current_profile: profile_data}, f, indent=2)
+                json.dump({self.logic.current_profile: profile_data}, f, indent=2)
             messagebox.showinfo("Export Success", f"Profile exported to:\n{export_path}", parent=self.root)
         except Exception as e:
             messagebox.showerror("Export Error", f"Failed to export profile:\n{e}", parent=self.root)
@@ -577,13 +319,13 @@ class ModManagerApp:
             name = simpledialog.askstring("New Profile", "Enter profile name:", parent=self.root)
             if not name:
                 return
-            if name in self.profiles:
+            if name in self.logic.profiles:
                 messagebox.showerror("Error", f"Profile '{name}' already exists.", parent=self.root)
                 return
-        self.profiles[name] = {"mods": [], "mod_install_dir": DEFAULT_MODS_DIR}
-        self.current_profile = name
+        self.logic.profiles[name] = {"mods": [], "mod_install_dir": DEFAULT_MODS_DIR}
+        self.logic.current_profile = name
         self.profile_var.set(name)
-        self._save_profiles()
+        self.logic.save_profiles()
         self._refresh_profile_combo()
         self._refresh_mod_list()
 
@@ -592,19 +334,19 @@ class ModManagerApp:
             self.profile_manager_dialog.update_profile_name(new_profile_name)
 
     def _rename_profile(self):
-        if not self.current_profile:
+        if not self.logic.current_profile:
             messagebox.showerror("Error", "No profile selected.", parent=self.root)
             return
-        new_name = simpledialog.askstring("Rename Profile", "Enter new profile name:", initialvalue=self.current_profile, parent=self.root)
-        if not new_name or new_name == self.current_profile:
+        new_name = simpledialog.askstring("Rename Profile", "Enter new profile name:", initialvalue=self.logic.current_profile, parent=self.root)
+        if not new_name or new_name == self.logic.current_profile:
             return
-        if new_name in self.profiles:
+        if new_name in self.logic.profiles:
             messagebox.showerror("Error", f"Profile '{new_name}' already exists.", parent=self.root)
             return
-        self.profiles[new_name] = self.profiles.pop(self.current_profile)
-        self.current_profile = new_name
+        self.logic.profiles[new_name] = self.logic.profiles.pop(self.logic.current_profile)
+        self.logic.current_profile = new_name
         self.profile_var.set(new_name)
-        self._save_profiles()
+        self.logic.save_profiles()
         self._refresh_profile_combo()
         self._refresh_mod_list()
 
@@ -613,18 +355,18 @@ class ModManagerApp:
             self.profile_manager_dialog.update_profile_name(new_profile_name)
 
     def _delete_profile(self):
-        if not self.current_profile:
+        if not self.logic.current_profile:
             messagebox.showerror("Error", "No profile selected.", parent=self.root)
             return
-        if len(self.profiles) == 1:
+        if len(self.logic.profiles) == 1:
             messagebox.showerror("Error", "Cannot delete the only profile.", parent=self.root)
             return
-        confirm = messagebox.askyesno("Delete Profile", f"Are you sure you want to delete profile '{self.current_profile}'?", parent=self.root)
+        confirm = messagebox.askyesno("Delete Profile", f"Are you sure you want to delete profile '{self.logic.current_profile}'?", parent=self.root)
         if confirm:
-            del self.profiles[self.current_profile]
-            self.current_profile = next(iter(self.profiles.keys()), None)
-            self.profile_var.set(self.current_profile)
-            self._save_profiles()
+            del self.logic.profiles[self.logic.current_profile]
+            self.logic.current_profile = next(iter(self.logic.profiles.keys()), None)
+            self.profile_var.set(self.logic.current_profile)
+            self.logic.save_profiles()
             self._refresh_profile_combo()
             self._refresh_mod_list()
             
@@ -633,25 +375,25 @@ class ModManagerApp:
                 self.profile_manager_dialog.update_profile_name(new_profile_name)
 
     def _refresh_profile_combo(self):
-        profiles_list = list(self.profiles.keys())
+        profiles_list = list(self.logic.profiles.keys())
         self.profile_combo['values'] = profiles_list
 
     def _on_profile_change(self, event=None):
         selected = self.profile_var.get()
-        if selected and selected != self.current_profile:
-            self.current_profile = selected
-            profile = self.profiles.get(self.current_profile, {})
+        if selected and selected != self.logic.current_profile:
+            self.logic.current_profile = selected
+            profile = self.logic.profiles.get(self.logic.current_profile, {})
             if isinstance(profile, dict):
                 rel_path = profile.get("mod_install_dir", DEFAULT_MODS_DIR)
-                self.mod_install_dir = self._resolve_install_dir(rel_path)
+                self.logic.mod_install_dir = self.logic.resolve_install_dir(rel_path)
             else:
-                self.mod_install_dir = DEFAULT_MODS_DIR
-            self._save_profiles()
+                self.logic.mod_install_dir = DEFAULT_MODS_DIR
+            self.logic.save_profiles()
             self._refresh_mod_list()
 
     # --- Mod List Management ---
     def _get_mods(self):
-        profile = self.profiles.get(self.current_profile, {})
+        profile = self.logic.profiles.get(self.logic.current_profile, {})
         if isinstance(profile, dict):
             return profile.get("mods", [])
         return profile  # support old format
@@ -660,17 +402,17 @@ class ModManagerApp:
         install_type = mod.get("install_type", "mod")
         # Use profile's mod_install_dir for mods, else use default for tileset/soundpack
         if install_type == "mod":
-            return self.mod_install_dir
+            return self.logic.mod_install_dir
         else:
-            return INSTALL_TYPE_DIRS.get(install_type, self.mod_install_dir)
+            return INSTALL_TYPE_DIRS.get(install_type, self.logic.mod_install_dir)
 
     def _set_mods(self, mods):
-        profile = self.profiles.get(self.current_profile, {})
+        profile = self.logic.profiles.get(self.logic.current_profile, {})
         if isinstance(profile, dict):
             profile["mods"] = mods
         else:
-            self.profiles[self.current_profile] = mods
-        self._save_profiles()
+            self.logic.profiles[self.logic.current_profile] = mods
+        self.logic.save_profiles()
 
     def _refresh_mod_list(self):
         self.listbox.delete(0, tk.END)
@@ -873,32 +615,32 @@ class ModManagerApp:
             self._refresh_mod_list()
     
     def _set_mod_install_dir(self):
-        new_dir = filedialog.askdirectory(title="Select Mod Install Directory", initialdir=self.mod_install_dir)
+        new_dir = filedialog.askdirectory(title="Select Mod Install Directory", initialdir=self.logic.mod_install_dir)
         if new_dir:
-            self.mod_install_dir = new_dir
-            if self.current_profile and self.current_profile in self.profiles:
-                profile = self.profiles[self.current_profile]
+            self.logic.mod_install_dir = new_dir
+            if self.logic.current_profile and self.logic.current_profile in self.logic.profiles:
+                profile = self.logic.profiles[self.logic.current_profile]
                 if isinstance(profile, dict):
-                    profile["mod_install_dir"] = self._make_path_relative(new_dir)
+                    profile["mod_install_dir"] = self.logic.make_path_relative(new_dir)
                 else:
-                    self.profiles[self.current_profile] = {"mods": profile, "mod_install_dir": self._make_path_relative(new_dir)}
-                self._save_profiles()
+                    self.logic.profiles[self.logic.current_profile] = {"mods": profile, "mod_install_dir": self.logic.make_path_relative(new_dir)}
+                self.logic.save_profiles()
 
             # If dialog open, update any UI if needed (example: update profile label)
             if hasattr(self, "profile_manager_dialog"):
-                self.profile_manager_dialog.update_profile_name(self.current_profile)
+                self.profile_manager_dialog.update_profile_name(self.logic.current_profile)
 
     def _open_mod_folder(self):
-        if not os.path.isdir(self.mod_install_dir):
-            messagebox.showerror("Error", f"Mod install directory does not exist:\n{self.mod_install_dir}", parent=self.root)
+        if not os.path.isdir(self.logic.mod_install_dir):
+            messagebox.showerror("Error", f"Mod install directory does not exist:\n{self.logic.mod_install_dir}", parent=self.root)
             return
         try:
             if sys.platform.startswith("win"):
-                os.startfile(self.mod_install_dir)
+                os.startfile(self.logic.mod_install_dir)
             elif sys.platform.startswith("darwin"):
-                subprocess.Popen(["open", self.mod_install_dir])
+                subprocess.Popen(["open", self.logic.mod_install_dir])
             else:
-                subprocess.Popen(["xdg-open", self.mod_install_dir])
+                subprocess.Popen(["xdg-open", self.logic.mod_install_dir])
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open directory:\n{e}", parent=self.root)
 
@@ -908,58 +650,16 @@ class ModManagerApp:
             messagebox.showinfo("Info", "No mods to update.", parent=self.root)
             return
 
-        # Show updating popup
-        self.update_popup = Toplevel(self.root)
-        self.update_popup.title("Updating Mods")
-        self.update_popup.geometry("400x150")
-        self.update_popup.transient(self.root)
-        self.update_popup.grab_set()
-        
-        self.update_status_label = Label(self.update_popup, text="Updating...", wraplength=350)
-        self.update_status_label.pack(expand=True, pady=20)
+        # show updating popup using new dialog class
+        self.update_progress_dialog = UpdateProgressDialog(self.root)
 
         self.root.after(100, self._update_mods_worker)
 
     def _show_error_dialog(self, title, message, errors):
         """show a scrollable error dialog for long error messages
-        
-        args:
-            title: dialog window title
-            message: header message
-            errors: list of error tuples (name, error_message)
+        now uses the refactored dialog class
         """
-        dialog = Toplevel(self.root)
-        dialog.title(title)
-        dialog.geometry("700x500")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        
-        # header label
-        header_label = Label(dialog, text=message, font=("TkDefaultFont", 11, "bold"))
-        header_label.pack(padx=20, pady=(20, 10), anchor="w")
-        
-        # scrollable text frame
-        text_frame = tk.Frame(dialog)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
-        
-        scrollbar = ttk.Scrollbar(text_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        error_text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("TkDefaultFont", 10))
-        error_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=error_text.yview)
-        
-        # populate error text
-        for name, error in errors:
-            error_text.insert(tk.END, f"• {name}\n", "bold")
-            error_text.insert(tk.END, f"  {error}\n\n")
-        
-        # make bold tag
-        error_text.tag_config("bold", font=("TkDefaultFont", 10, "bold"))
-        error_text.config(state=tk.DISABLED)
-        
-        # close button
-        tk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=(0, 20))
+        show_error_dialog(self.root, title, message, errors)
 
     def _update_mods_worker(self, mod_index=0, errors=None, success_count=0):
         """Recursively update mods with delays between each one"""
@@ -969,8 +669,8 @@ class ModManagerApp:
         mods = self._get_mods()
         
         if mod_index >= len(mods):
-            # Close the popup
-            self.update_popup.destroy()
+            # close the popup
+            self.update_progress_dialog.close()
 
             if errors:
                 # create scrollable error dialog for long error messages
@@ -981,10 +681,11 @@ class ModManagerApp:
         
         mod = mods[mod_index]
         
-        # Update status label
+        # update status label
         mod_name = self._get_mod_display_name(mod)
-        self.update_status_label.config(text=f"Updating... ({mod_index+1}/{len(mods)})\n{mod_name}")
-        self.update_popup.update()
+        self.update_progress_dialog.update_status(
+            f"Updating... ({mod_index+1}/{len(mods)})\n{mod_name}"
+        )
         
         try:
             self._download_and_extract_mod(mod)
@@ -1015,13 +716,13 @@ class ModManagerApp:
 
         # If install_subdir is not defined, None, blank, or '.', always use <mod_install_dir>/mods
         if not install_subdir or install_subdir == ".":
-            base_install_dir = os.path.join(os.path.abspath(self.mod_install_dir), "mods")
+            base_install_dir = os.path.join(os.path.abspath(self.logic.mod_install_dir), "mods")
         else:
             # If install_subdir is absolute, use as is; else, join with mod_install_dir
             if os.path.isabs(install_subdir):
                 base_install_dir = install_subdir
             else:
-                base_install_dir = os.path.join(os.path.abspath(self.mod_install_dir), install_subdir)
+                base_install_dir = os.path.join(os.path.abspath(self.logic.mod_install_dir), install_subdir)
 
         if not url:
             raise ValueError("No URL provided for mod")
@@ -1136,11 +837,11 @@ class ModManagerApp:
     def _get_installed_folder_base(self):
         selected_display = self.folder_var.get()
         folder_type = self.folder_map.get(selected_display, "mods")
-        return os.path.join(os.path.abspath(self.mod_install_dir), folder_type)
+        return os.path.join(os.path.abspath(self.logic.mod_install_dir), folder_type)
 
     def _open_root_folder(self):
         """Open the game root directory (parent of mods dir) in the system file explorer."""
-        mods_dir = os.path.abspath(self.mod_install_dir)
+        mods_dir = os.path.abspath(self.logic.mod_install_dir)
         game_root = os.path.dirname(mods_dir)
         if not os.path.isdir(game_root):
             messagebox.showerror("Error", f"Game root directory does not exist:\n{game_root}", parent=self.root)
