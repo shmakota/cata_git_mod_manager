@@ -27,11 +27,11 @@ class Updater:
                 with open(VERSION_FILE, 'r') as f:
                     data = json.load(f)
                     # Try program_version first, fall back to version for backwards compatibility
-                    return data.get("program_version", data.get("version", "1.0.5"))
+                    return data.get("program_version", data.get("version", "1.0.7"))
             except Exception as e:
                 logging.error(f"Error loading version: {e}")
-                return "1.0.5"
-        return "1.0.5"
+                return "1.0.7"
+        return "1.0.7"
     
     def _load_update_url(self):
         """Load update URL from version.json"""

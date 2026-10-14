@@ -13,7 +13,7 @@ A comprehensive utility program primarily created for **Cataclysm: Bright Nights
 ## 🚀 Features
 
 ### 📦 Game Launcher
-Allows the user to install the latest C:BN nightly or experimental release.
+Choose Stable, Nightly, or Experimental in the release channel selector, then select a version and click Download & Install. Stable and Nightly list up to ten releases. Use Launch Game to play the installed version. All channels install into the configured game folder; switching channels replaces the installed game there.
   
 <img width="545" height="253" alt="image" src="https://github.com/user-attachments/assets/85e7b9cc-11dd-48c7-93e3-f398377adde4" />
   

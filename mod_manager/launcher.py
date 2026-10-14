@@ -63,12 +63,19 @@ class CataInstallerApp:
 
         self.releases = []
         self.selected_release = None
-        self.use_experimental = tk.BooleanVar(value=False)
+        self.release_channel = tk.StringVar(value="Nightly")
 
-        # Experimental toggle
+        # Choose which release channel to install.
         exp_frame = tk.Frame(root)
         exp_frame.pack(padx=10, pady=(10, 5))
-        tk.Checkbutton(exp_frame, text="Show Experimental Build", variable=self.use_experimental, command=self.toggle_experimental).pack(side=tk.LEFT)
+        tk.Label(exp_frame, text="Release channel:").pack(side=tk.LEFT, padx=(0, 8))
+        channel_dropdown = ttk.Combobox(
+            exp_frame, state="readonly", width=16,
+            textvariable=self.release_channel,
+            values=("Stable", "Nightly", "Experimental")
+        )
+        channel_dropdown.pack(side=tk.LEFT)
+        channel_dropdown.bind("<<ComboboxSelected>>", lambda event: self.fetch_releases())
 
         # Dropdown
         self.dropdown = ttk.Combobox(root, state="readonly", width=60)
@@ -122,7 +129,7 @@ class CataInstallerApp:
         
         # Ensure program_version and update_url exist
         if "program_version" not in data:
-            data["program_version"] = "1.0.5"
+            data["program_version"] = "1.0.7"
         if "update_url" not in data:
             data["update_url"] = "https://api.github.com/repos/shmakota/cata_git_mod_manager/releases/latest"
         
@@ -152,20 +159,36 @@ class CataInstallerApp:
         self.installed_version_var.set(f"Installed version: {version}")
 
     def fetch_releases(self):
+        self.releases = []
+        self.selected_release = None
+        self.dropdown["values"] = []
         try:
             # show loading state
             self.dropdown.set("Loading releases from GitHub...")
             self.root.update()
             
-            if self.use_experimental.get():
-                response = requests.get(EXPERIMENTAL_API)
+            channel = self.release_channel.get()
+            if channel == "Experimental":
+                response = requests.get(EXPERIMENTAL_API, timeout=15)
                 response.raise_for_status()
                 release_data = response.json()
                 all_releases = [release_data]  # Wrap single release in list
             else:
-                response = requests.get(GITHUB_API)
-                response.raise_for_status()
-                all_releases = response.json()
+                # Stable releases can be buried behind months of nightly builds.
+                # Follow pagination rather than only searching the first page.
+                all_releases = []
+                next_url = GITHUB_API + "?per_page=100"
+                while next_url:
+                    response = requests.get(next_url, timeout=15)
+                    response.raise_for_status()
+                    for release in response.json():
+                        if release.get("draft") or release.get("tag_name") == "experimental":
+                            continue
+                        if bool(release.get("prerelease")) == (channel == "Nightly"):
+                            all_releases.append(release)
+                    if len(all_releases) >= 10:
+                        break
+                    next_url = response.links.get("next", {}).get("url")
 
             system = platform.system().lower()
             ext = ".zip" if "windows" in system else ".tar.gz"
@@ -175,12 +198,15 @@ class CataInstallerApp:
             for release in all_releases:
                 for asset in release.get("assets", []):
                     name = asset["name"].lower()
-                    # Check for tiles build and skip experimental unless checkbox is on
+                    # PDB archives contain debug symbols, not the playable game.
+                    if re.search(r"(?:^|[._-])pdb(?:[._-]|$)", name):
+                        continue
+                    # Match the channel as well as the platform and tiles build.
                     is_experimental = "experimental" in name
                     if name.endswith(ext) and keyword in name and "tiles" in name:
-                        if not self.use_experimental.get() and is_experimental:
+                        if channel != "Experimental" and is_experimental:
                             continue
-                        if self.use_experimental.get() and not is_experimental:
+                        if channel == "Experimental" and not is_experimental:
                             continue
                         filtered.append({
                             "name": release["name"],
@@ -190,6 +216,7 @@ class CataInstallerApp:
                         break
 
             self.releases = filtered[:10]
+            self.selected_release = None
             self.dropdown["values"] = [r["name"] for r in self.releases]
             if self.releases:
                 self.dropdown.current(0)
@@ -201,9 +228,6 @@ class CataInstallerApp:
             self.dropdown.set("Failed to load releases")
             messagebox.showerror("Error", f"Failed to fetch releases:\n{e}")
     
-    def toggle_experimental(self):
-        self.fetch_releases()
-
     def on_select(self, event):
         idx = self.dropdown.current()
         self.selected_release = self.releases[idx]
